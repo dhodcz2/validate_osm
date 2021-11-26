@@ -62,7 +62,10 @@ With a one-to-one relationship established between needle abstractions and hayst
 the data can be determined. If an OSM entry defines the construction date to be newer than the date of the data in the
 haystack, the match can be thrown out. These matches are as of now the end product of this framework: From this, one may
 have a smaller list of entries in OSM to manually validate, as well as a list of entries in OSM that may be more
-reliably used for investigations otherwise susceptible to errors, outdated information, or malicious behavior. <br/>
+reliably used for investigations otherwise susceptible to errors, outdated information, or malicious behavior. Here is a
+visualization of the normalized percent error between data from OpenStreetMaps and the [NYC 3D Model.](
+https://www1.nyc.gov/site/doitt/initiatives/3d-building.page)
+<br/>
 ![](discrepancies.png)
 
 ## API
