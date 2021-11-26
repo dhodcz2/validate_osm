@@ -1,4 +1,4 @@
-#ValidateOSM
+# ValidateOSM
 ---
 
 ValidateOSM is a framework in progress to validate data from the free, editable geographic database OpenStreetMap
@@ -17,7 +17,7 @@ Daniel Hodczak</br>
 with guidance and advising by:<br/>
 Fabio Miranda
 
-#Table of Contents
+# Table of Contents
 ---
 
 1. [Installation](#installation)
@@ -25,11 +25,11 @@ Fabio Miranda
 3. [Discrepancies](#mismatches)
 4. [API](#api)
 
-##Installation
+## Installation
 ---
 [placeholder]<br/>
 
-##Grouping
+## Grouping
 ---
 Currently, a query is made for entries that have the tag 'building' or 'building:part' within a specified region.
 Entries that have enumerative data, seperated with semicolons, are expanded into several entries with the same
@@ -42,13 +42,11 @@ This is a pseudo-colormap of the results of the aforementioned process, applied 
 south-western part of Manhattan. On the left are the various entries that have been determined to comprise a building;
 on the right are flattened data entries with single value-attributes instead of multiple-value attributes, for each
 building that the geometric border represents:  <br/>
-[placeholder]
 ![](needles.png)
 
 Once the OSM entries, the 'needles', are grouped, the geometric boundaries are then applied to other sources of data,
 the 'haystack', creating matches and potentially grouping geometries that were previously independent. This is a
 pseudo-colormap of a grouping made by the 'haystack':   <br/>
-[placeholder]
 ![](haystack.png)
 
 For each group in either the 'needles' or the 'haystack', the entries are compressed into a single entry per group,
@@ -56,10 +54,9 @@ representative of the data available from that group. In the case of validating 
 extracted as the maximum height of all the entries. After the entries have been flattened, there is a one-to-one
 relationship between the buildings in the needles and the buildings in the haystack. Here is a pseudo-colormap with the
 needles on the left, and the haystack on the right. Unmatched geometries are given in grey: <br/>
-[placeholder]
 ![](needles_haystack.png)
 
-##Discrepancies
+## Discrepancies
 ---
 With a one-to-one relationship established between needle abstractions and haystack abstractions, discrepancies between
 the data can be determined. If an OSM entry defines the construction date to be newer than the date of the data in the
@@ -68,7 +65,7 @@ have a smaller list of entries in OSM to manually validate, as well as a list of
 reliably used for investigations otherwise susceptible to errors, outdated information, or malicious behavior. <br/>
 ![](discrepancies.png)
 
-##API
+## API
 ---
 
 ### Source
