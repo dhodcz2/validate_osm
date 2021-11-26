@@ -70,25 +70,25 @@ reliably used for investigations otherwise susceptible to errors, outdated infor
 
 ### Source
 
-The *Source* class is the base class for which all data will be extracted with.  
+The *Source* class is the base class for which all data will be extracted with.  <br/>
 [placeholder]
 
 ### Needles
 
-The *Needles* class inherits from *Source*, and is in charge of extracting data from OpenStreetMaps.
+The *Needles* class inherits from *Source*, and is in charge of extracting data from OpenStreetMaps. <br/>
 [placeholder]
 
 ### Haystack
 
 The *Haystack* class inherits from *Source*, and implements little functionality. It is to be derived from when defining
-another class which handles how data is extracted from a non-OSM source.
+another class which handles how data is extracted from a non-OSM source. <br/>
 [placeholder]
 
 ### Mixins
 
 The ValidateOSM framework works with mixin abstract base classes to add modularity and uniformity to Sources.
 Inheritance from such a class necessitates that a Source is implemented, and also establishes what kind of column type
-that data is.
+that data is. <br/>
 [placeholder]
 
 ### Columns
