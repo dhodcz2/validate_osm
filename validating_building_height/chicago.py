@@ -24,7 +24,7 @@ from ValidateOSM.source import (
     BBox
 )
 from ValidateOSM.source import (
-    Source, SourceOSM, data, group, aggregate, enumerative
+    Source, SourceOSM, data, group, aggregate, enumerative, Static
 )
 from validating_building_height.base import (
     Height, NeedlesHeight,
@@ -52,20 +52,13 @@ class ChicagoBuildingHeightNeedles(NeedlesHeight, Chicago):
 class ChicagoBuildingFootprints(Chicago, Height):
     # TODO: Instead of 6 lines of code for classmethod property strings, perhaps just define them at the top
     #   and enforce definition for non-ABCs
+    name = 'cbf'
+    link = 'https://data.cityofchicago.org/Buildings/Building-Footprints-current-/hz9b-7nh8'
+    static = Static(url='https://data.cityofchicago.org/api/geospatial/hz9b-7nh8?method=export&format=GeoJSON')
 
     @property
     def raw(self) -> GeoDataFrame:
-        path = ROOT / 'validating_building_height' / 'static' / 'Building Footprints (current).zip'
-        return self.read_file(path)
-
-    @classmethod
-    @property
-    def name(cls) -> str:
-        return 'cbf'
-
-    @classmethod
-    def source_information(cls) -> str:
-        return 'https://data.cityofchicago.org/Buildings/Building-Footprints-current-/hz9b-7nh8'
+        return self.static
 
     def geometry(self) -> Iterable[shapely.geometry.base.BaseGeometry]:
         return self.raw.geometry.reset_index(drop=True)

@@ -112,101 +112,48 @@ class BBox:
 
 
 class Source(abc.ABC):
-    # TODO: Source.raw will be a descriptor with functionality for automatically
-    #   downloading and deleting the raw source file.
+    """raw | data | groups | aggregate """
+
+    @property
+    @abc.abstractmethod
+    def raw(self) -> Union[object, Iterator[object]]:
+        """An instance or Iterator of instances that encapsulate the raw data that is entering this pipeline."""
+
     data = DescriptorData()
     groups = DescriptorGroup()
     aggregate = DescriptorAggregate()
-    raw: Union[object, Iterator[object]] = None
-    bbox: BBox
-    path_static: Optional[Path]
-
-    def __new__(cls, **kwargs):
-        @property
-        def decorator(func: Callable):
-            @functools.wraps(func)
-            def wrapper(self: Source):
-                if not hasattr(self, '_raw'):
-                    self._raw = func(self)
-                return self._raw
-
-            return wrapper
-
-        # Cache self.raw and apply @property if user has forgotten
-        cls.raw = decorator(cls.raw.fget if isinstance(cls.raw, property) else cls.raw)
-        instance: Source = super(Source, cls).__new__(**kwargs)
-        instance.__init__(**kwargs)
-        return instance
-
-    @abc.abstractmethod
-    @property
-    def raw(self) -> Union[object, Iterator[object]]:
-        ...
-
-    raw: object
-
-    def read_file(self, path: Path):
-        if not os.path.isdir(path):
-            return gpd.read_file(
-                filename=path,
-                bbox=self.bbox.raw.cartesian,
-                rows=100 if args.debug else None,
-            )
-        else:
-            files: Iterator[Path] = (
-                p for p in path.glob('**/*')
-                if p.is_file()
-            )
-            return (
-                gpd.read_file(
-                    filename=f,
-                    bbox=self.bbox.raw.cartesian,
-                    rows=100 if args.debug else None,
-                )
-                for f in files
-            )
-
-    @staticmethod
-    def concat(gdfs: Iterable[GeoDataFrame]) -> GeoDataFrame:
-        """Workaround because GeoDataFrame.concat returns DataFrame; we want to preserve CRS."""
-        crs = {}
-
-        def generator():
-            nonlocal gdfs
-            gdfs = iter(gdfs)
-            gdf = next(gdfs)
-            for col in gdf:
-                if not isinstance(gdf[col], GeoSeries):
-                    continue
-                gs: GeoSeries = gdf[col]
-                crs[col] = gs.crs
-            yield gdf
-            yield from gdfs
-
-        result: DataFrame = pd.concat(generator())
-        result: GeoDataFrame = GeoDataFrame({
-            col: (
-                result[col] if col not in crs
-                else GeoSeries(result[col], crs=crs)
-            )
-            for col in result
-        })
-        return result
 
     @classmethod
     @property
     @abc.abstractmethod
     def name(cls) -> str:
-        ...
+        """A short, abbreviated name that may be used for quickly selecting a specific source."""
 
     @classmethod
     @property
     @abc.abstractmethod
-    def source_information(cls) -> str:
-        ...
+    def link(cls) -> str:
+        """A link to the page for further data regarding the Source"""
 
-    validating = classmethod(property(data.validating))
-    identifier: str = classmethod(property(data.identifier))
+    @classmethod
+    @property
+    @abc.abstractmethod
+    def bbox(self) -> BBox:
+        """A BBox which represents the bounds of which relevant data from the Source is extracted."""
+
+    @classmethod
+    @property
+    def validating(cls) -> set[str]:
+        """The specific columns that will be validated"""
+        return cls.data.validating
+
+    @classmethod
+    @property
+    def identifier(cls) -> set[str]:
+        """The identifier(s) that may be used to establish help establish relationships
+         both between and across datasets"""
+        return cls.data.identifier
+
 
     @DecoratorData(dtype='geometry', crs=4326)
     @abc.abstractmethod
@@ -290,6 +237,7 @@ class Source(abc.ABC):
 
     @DecoratorGroup.dependent(name='containment')
     def _(self, dependency: 'Source') -> ValuesView[Iterable[int]]:
+        # TODO: DecoratorGroup.dependent should return the iloc of the dependency.aggregate
         geometry: GeoSeries = self.data['geometry'].to_crs(3857)
         area = geometry.area
         dep = dependency.aggregate
@@ -313,7 +261,6 @@ class Source(abc.ABC):
             else:
                 return np.nan
 
-    # TODO: DecoratorGroup.dependent should return the iloc of the dependency.aggregate
     # TODO: When I originally implemented this, matching based on identifier didn't seem too helpful;
     #   disconnected buildings within/across datasets would be matched
     # @DecoratorGroup.independent(name='identifier')
@@ -324,4 +271,20 @@ class Source(abc.ABC):
     #     for index, val in zip(dependency.aggregate.index, dependency.aggregate[id])
     #
     # }
-#
+    #
+
+    def __new__(cls):
+        @property
+        def decorator(raw: property):
+            @functools.wraps(functools)
+            def wrapper(self: Source):
+                if not hasattr(self, '_raw'):
+                    self._raw = raw.fget(self)
+                return self._raw
+
+            return wrapper
+
+        cls.raw = decorator(cls.raw)    # I think cls.raw can be set it's just ill-advised
+        obj: Source = super(Source, cls).__new__()
+        obj.__init__()
+        return obj

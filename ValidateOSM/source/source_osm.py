@@ -303,6 +303,12 @@ class SourceOSM(Source, abc.ABC):
     enumerative = DescriptorEnumerative()
     ways = DescriptorWays()
     relations = DescriptorRelations()
+    name='osm'
+
+    @property
+    def raw(self) -> OverpassResult:
+        self.raw: Union[OverpassResult, Iterator[OverpassResult]] = \
+            itertools.chain(self.ways, self.relations)
 
     @classmethod
     @abc.abstractmethod
@@ -312,16 +318,6 @@ class SourceOSM(Source, abc.ABC):
     @abc.abstractmethod
     def containers(self) -> Iterable[int]:
         """Return the element ID of elements that will be considered geometric containers"""
-
-    def __init__(self, **kwargs):
-        self.raw: Union[OverpassResult, Iterator[OverpassResult]] = \
-            itertools.chain(self.ways, self.relations)
-    raw: OverpassResult
-
-    @classmethod
-    @property
-    def name(cls) -> str:
-        return 'osm'
 
     @classmethod
     @property

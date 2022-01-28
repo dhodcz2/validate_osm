@@ -3,6 +3,7 @@ from collections import UserDict
 import os
 from pathlib import Path
 
+import pandas as pd
 from geopandas import GeoDataFrame
 import inspect
 
@@ -21,7 +22,7 @@ from typing import Callable, Any, Optional, Iterator, Iterable, Collection, Unio
 from collections import ChainMap
 
 import pandas
-from pandas import Series
+from pandas import Series, DataFrame
 from weakref import WeakKeyDictionary
 
 
@@ -123,14 +124,12 @@ class DecoratorData(_DecoratorData):
         In addition to wrapping a function as @data, this marks a particular column as being able to be used as a
         identifier to indicate relationships across datasets.
         """
-        ...
 
     class validate(_DecoratorData):
         """
         In addition to wrapping a function as @data, this marks a particular column as one that will be validated as an
         end goal;
         """
-        ...
 
 
 class CacheStructs(UserDict):
@@ -282,6 +281,33 @@ class CacheData(UserDict):
 
         return data
 
+    @staticmethod
+    def concat(gdfs: Iterable[GeoDataFrame]) -> GeoDataFrame:
+        """Workaround because GeoDataFrame.concat returns DataFrame; we want to preserve CRS."""
+        crs = {}
+
+        def generator():
+            nonlocal gdfs
+            gdfs = iter(gdfs)
+            gdf = next(gdfs)
+            for col in gdf:
+                if not isinstance(gdf[col], GeoSeries):
+                    continue
+                gs: GeoSeries = gdf[col]
+                crs[col] = gs.crs
+            yield gdf
+            yield from gdfs
+
+        result: DataFrame = pd.concat(generator())
+        result: GeoDataFrame = GeoDataFrame({
+            col: (
+                result[col] if col not in crs
+                else GeoSeries(result[col], crs=crs)
+            )
+            for col in result
+        })
+        return result
+
 
 class DescriptorData:
     """
@@ -322,24 +348,23 @@ class DescriptorData:
     def __bool__(self):
         return self._instance in self._cache_data
 
-    def validating(self, owner) -> set[str]:
-        structs = self._cache_data._cache_structs[owner]
+    @property
+    def validating(self) -> set[str]:
+        structs = self._cache_data._cache_structs[self._owner]
         return {
             name
             for name, struct in structs.items()
             if struct.subtype is DecoratorData.validate
         }
 
-    def identifier(self, owner) -> str:
-        structs = self._cache_data._cache_structs[owner]
-        result = {
+    @property
+    def identifier(self) -> set[str]:
+        structs = self._cache_data._cache_structs[self._owner]
+        return {
             name
             for name, struct in structs.items()
             if struct.subtype is DecoratorData.identifier
         }
-        if len(result) > 1:
-            raise ValueError(f"{self._owner} has defined more than one identifier: {result}")
-        return result.pop()
 
     @property
     def path(self) -> Path:

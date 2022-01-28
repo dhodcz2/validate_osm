@@ -24,16 +24,17 @@ from ValidateOSM.source import (
     data,
     aggregate,
     enumerative,
+    Static
 )
 
 
 class NewYork(Source, abc.ABC):
+    bbox = BBox([40.70010232505462, -74.01998471326246, 40.750102666482995, -73.96432847885934])
+
     @data.identifier('Int64')
     @abc.abstractmethod
     def bin(self) -> Iterable[int]:
         """The New York Building Identification Number"""
-
-    bbox = BBox([40.70010232505462, -74.01998471326246, 40.750102666482995, -73.96432847885934])
 
 
 class NewYorkBuildingHeightNeedles(NeedlesHeight, NewYork):
@@ -46,24 +47,15 @@ class NewYorkBuildingHeightNeedles(NeedlesHeight, NewYork):
 
 
 class NewYork3DModel(NewYork, Height):
-    def __init__(self):
-        self.bbox.raw.crs = 2263
-        self.bbox.raw.flip = True
+    static = Static(url="https://www1.nyc.gov/site/doitt/initiatives/3d-building.page", unzipped='DA_WISE_Multipatch')
+    name = '3dm'
+    link = 'https://www1.nyc.gov/site/doitt/initiatives/3d-building.page'
 
     @property
     def raw(self) -> GeoDataFrame:
-        path = ROOT / 'validating_building_height' / 'static' / 'DA_WISE_Multipatch'
-        return self.from_file(path)
-
-    @classmethod
-    @property
-    def source_information(cls) -> str:
-        return 'https://www1.nyc.gov/site/doitt/initiatives/3d-building.page'
-
-    @classmethod
-    @property
-    def name(cls) -> str:
-        return '3dm'
+        self.bbox.raw.crs = 2263
+        self.bbox.raw.flip = True
+        return self.static
 
     def height_m(self) -> Iterable[float]:
         METERS_PER_FOOT = .3048
@@ -94,24 +86,36 @@ class NewYork3DModel(NewYork, Height):
 
 
 class NewYorkOpenCityModel(NewYork, Height):
-    def __init__(self):
-        self.bbox.raw.crs = 'epsg:4979'
+    # TODO: The OpenCityModel is HUGE. I need to put more time into fully utilizing this dataset.
+    #   This uses:
+    #       MS USBuildingFootprints
+    #       MS Building Footprints (2017)
+    #       Open Street Map
+    #       LA County LARIAC4 (2014)
 
-    @classmethod
+    # TODO: Is it problematic that we are validating OpenStreetMaps with a source that contains Open Street Maps itself?
+    #   Can we filter out the OSM entries and still use the dataset?
+
+
+    # TODO: UBID is the standard for uniquely identifying building footprints on the Earth.
+    #   UBID for a building footprint has five components:
+    #   1   Open Location Code for the geometric center of mass (centroid) of the building footprint.
+    #   2   The distance to tne northern extent of the bounding box for the building foot in Open Location Code units
+    #   3   The distance to the eastern extent ...
+    #   4   The distance to the southern extent ...
+    #   5   The distance to the western extent ...
+
+    # TODO: Temporary placeholder to just leverage one source that is particularly
+    # TODO: This Static file is zipped with one file. Be certain this works without specification of unzipped contents
+    static = Static(
+        url='https://s3.dualstack.us-east-1.amazonaws.com/opencitymodel/2019-jun/gml/NewYork/36061/'
+            'NewYork-36061-000.zip',
+    )
+
     @property
     def raw(self) -> GeoDataFrame:
-        path = ROOT / 'validating_building_height' / 'static' / 'NewYork-36061-000.gml'
-        return self.read_file(path)
-
-    @classmethod
-    @property
-    def name(cls) -> str:
-        return 'ocm'
-
-    @classmethod
-    @property
-    def source_information(cls):
-        return 'https://github.com/opencitymodel/opencitymodel'
+        self.bbox.raw.crs = 'epsg:4979'
+        return self.static
 
     def height_m(self) -> Iterable[float]:
         return np.nan
@@ -136,24 +140,18 @@ class NewYorkOpenCityModel(NewYork, Height):
 
 
 class NewYorkLOD(NewYork, Height):
-    def __init__(self):
-        self.bbox.raw.crs = None
+    link = 'https://www.asg.ed.tum.de/gis/projekte/new-york-city-3d/#c753'
+    name = 'lod'
+    static = Static(
+        url='http://www.3dcitydb.net/3dcitydb/fileadmin/public/datasets/NYC/NYC_buildings_CityGML_LoD2/'
+            'NYC_Buildings_LoD2_CityGML.zip',
+        unzipped='NYC_Buildings_LoD2_CityGML.gml'
+    )
 
     @property
-    @classmethod
     def raw(self) -> GeoDataFrame:
-        path = ROOT / 'validating_building_height' / 'static' / 'NYC_Buildings_LoD2_CityGML.gml'
-        return self.read_file(path)
-
-    @classmethod
-    @property
-    def name(cls) -> str:
-        return 'lod'
-
-    @classmethod
-    @property
-    def source_information(cls):
-        return 'https://www.asg.ed.tum.de/gis/projekte/new-york-city-3d/#c753'
+        self.bbox.raw.crs = None
+        return self.static
 
     def height_m(self) -> Union[pd.Series, Iterable]:
         ...

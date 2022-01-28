@@ -15,3 +15,6 @@ from ValidateOSM.source.source_osm import (
     DecoratorEnumerative as enumerative,
     SourceOSM
 )
+from ValidateOSM.source.static import (
+    Static
+)
