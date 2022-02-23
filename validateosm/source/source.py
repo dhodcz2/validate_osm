@@ -136,9 +136,9 @@ class Source(abc.ABC):
     '''
 
     resource: Union[gpd.GeoDataFrame, StaticBase]
-    data = DescriptorData()
-    groups = DescriptorGroup()
-    aggregate = DescriptorAggregate()
+    data: Union[DescriptorData, GeoDataFrame] = DescriptorData()
+    groups: Union[Groups, DescriptorGroup] = DescriptorGroup()
+    aggregate: Union[DescriptorAggregate, GeoDataFrame] = DescriptorAggregate()
     footprint: Optional['Source']
     name: str
     link: str
