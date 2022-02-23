@@ -6,7 +6,7 @@ setup(
     author='Daniel Hodczak',
     author_email='dhodcz2@uic.edu',
     packages=[
-        'validateosm.source', 'validateosm.compare', 'validate_building_height'
+        'validateosm', 'validateosm.source', 'validateosm.compare', 'validate_building_height'
     ],
     url='https://github.com/dhodcz2/ValidateOSM',
     description='Global, open validation of databases, particularly that of OpenStreetMaps',
