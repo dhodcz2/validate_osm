@@ -16,7 +16,7 @@ investigations that wish to leverage the free, abundant data available on OSM.
 
 # Installation
 
-`pip install validateosm`
+`pip install -e git=https://github.com/dhodcz2/ValidateOSM#egg=validateosm`</br>
 
 # Methodology
 
