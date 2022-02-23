@@ -1,9 +1,10 @@
+import geopandas as gpd
 import dataclasses
 import math
 from collections import UserList
 from weakref import WeakKeyDictionary
 from ValidateOSM.source.data import CacheData
-from typing import ValuesView, Union
+from typing import ValuesView, Union, Collection, Generator
 
 import psutil
 from ValidateOSM.source.source import DescriptorData
@@ -91,7 +92,7 @@ class DescriptorEnumerative:
                 pass
         self._instance: SourceOSM = instance
         self._owner: Type[SourceOSM] = owner
-        self._columns_rows_lists = self._cache.setdefault(self._instance.raw, {})
+        self._columns_rows_lists = self._cache.setdefault(self._instance.resource, {})
         return self
 
     def __setitem__(self, key, value):
@@ -294,21 +295,30 @@ class CacheNeedlesData(CacheData):
         data = self.drop_incomplete_relations(data)
         return data
 
+
 class DescriptorNeedlesData(DescriptorData):
     _cache_data: WeakKeyDictionary[object, GeoDataFrame] = CacheNeedlesData()
 
+class NonStaticOverpass():
+    def __iter__(self) -> Generator[OverpassResult, None, None]:
+        ...
 
+
+
+# TODO: Instead of Source.ways and Source.relations, resource=NonStaticOverpass
 class SourceOSM(Source, abc.ABC):
     data = DescriptorNeedlesData()
     enumerative = DescriptorEnumerative()
     ways = DescriptorWays()
     relations = DescriptorRelations()
-    name='osm'
+    name = 'osm'
+    link = 'https://www.openstreetmap.org'
 
-    @property
-    def raw(self) -> OverpassResult:
-        self.raw: Union[OverpassResult, Iterator[OverpassResult]] = \
-            itertools.chain(self.ways, self.relations)
+
+    @functools.cached_property
+    def resource(self) -> Union[OverpassResult, Iterator[OverpassResult]]:
+        raise NotImplementedError
+        # return itertools.chain(self.ways, self.relations)
 
     @classmethod
     @abc.abstractmethod
@@ -319,15 +329,10 @@ class SourceOSM(Source, abc.ABC):
     def containers(self) -> Iterable[int]:
         """Return the element ID of elements that will be considered geometric containers"""
 
-    @classmethod
-    @property
-    def source_information(cls) -> str:
-        return ''
-
     def timestamp(self) -> Iterable[datetime]:
         generator: Iterator[datetime] = (
             datetime.strptime(element.timestamp(), '%Y-%m-%dT%H:%M:%SZ')
-            for element in self.raw
+            for element in self.resource
         )
         return Series(generator, dtype='datetimens[64]')
 
@@ -342,7 +347,7 @@ class SourceOSM(Source, abc.ABC):
         }
 
         def generator():
-            for element in self.raw:
+            for element in self.resource:
                 if not (element.type() == 'way' or element.tag('type') == 'multipolygon'):
                     yield None
                     continue
@@ -357,18 +362,21 @@ class SourceOSM(Source, abc.ABC):
         gs = GeoSeries(generator(), crs=4326)
         return gs
 
-    @DecoratorGroup.independent(name='way')
-    def _(self) -> ValuesView[Iterable[int]]:
-        self.data: GeoDataFrame
-        return self.data.groupby('way').indices.values()
+    @DecoratorGroup(name='way')
+    def _(self) -> ValuesView[Collection[int]]:
+        return self.data.groupby('way', dropna=True).indices.values()
 
-    @DecoratorGroup.independent(name='relation')
-    def _(self) -> ValuesView[Iterable[int]]:
-        self.data: GeoDataFrame
-        return self.data.groupby('relation').indices.values()
+    @DecoratorGroup(name='relation')
+    def _(self) -> ValuesView[Collection[int]]:
+        return self.data.groupby('relation', dropna=True).indices.values()
 
-    @DecoratorGroup.independent(name='containment')
-    def _(self) -> ValuesView[Iterable[int]]:
+    @DecoratorGroup(name='footprint')
+    # TODO: self.footprint = None or self.footprint = Other
+    def _(self) -> ValuesView[Collection[int]]:
+        if self.footprint is not None and self.footprint is not self.__class__:
+            # Problem: how do we handle inheritance?
+            return super(SourceOSM, self).footprint()
+
         data: GeoDataFrame = self.data
 
         way = data.index.get_level_values('way')
@@ -376,15 +384,15 @@ class SourceOSM(Source, abc.ABC):
         relations: GeoDataFrame = relations[~relations.index.get_level_values('relation').duplicated()]
         ways = data[way.notna()]
         ways: GeoDataFrame = ways[~ways.index.get_level_values('way').duplicated()]
-        unique = relations.append(ways)
+        data = relations.append(ways)
 
-        unique['geometry'] = unique.geometry.to_crs(3857)
-        unique['area'] = unique.area
-        unique['buffer'] = unique.buffer(1)
-        unique['containment'] = pd.Series(np.nan, dtype='Int64', index=unique.index)
+        data['geometry'] = data.geometry.to_crs(3857)
+        data['area'] = data.area
+        data['buffer'] = data.buffer(1)
+        data['containment'] = pd.Series(np.nan, dtype='Int64', index=data.index)
 
-        containers = unique[unique['container']]
-        contained = unique[~unique['container']]
+        containers = data[data['container']]
+        contained = data[~data['container']]
         containers.sort_values('area', ascending=False)
         containers['containment'] = range(len(containers))  # 0, 1, 2, 3...
 
@@ -419,56 +427,96 @@ class SourceOSM(Source, abc.ABC):
                     continue
                 if containers.loc[n, 'buffer'].contains(g):
                     contained.loc[i, 'containment'] = containers.loc[n, 'containment']
-        data.loc[contained.index, 'containment'] = contained['containment']
+
+        # data.loc[contained.index, 'containment'] = contained['containment']
 
         return data.groupby('containment').indices.values()
 
-        # TODO: How do we exclude uninteresting or 'garbage' entries?
+    # TODO:
+    @DecoratorGroup('footprint')
+    def _(self) -> ValuesView[Collection[int]]:
+        data: GeoDataFrame = self.data
+        _way = data.index.get_level_values('way')
+        relations = data[_way.isna()]
+        relations: GeoDataFrame = relations[~relations.index.get_level_values('relation').duplicated()]
+        ways = data[_way.notna()]
+        ways: GeoDataFrame = ways[~ways.index.get_level_values('way').duplicated()]
+        data = relations.append(ways)
 
-        #     #   Perhpas it is not the duty of containment to determine
-        #     # garbage_ways: GeoDataFrame = uncontained[(
-        #     #         (uncontained['way'].notna()) &
-        #     #         (uncontained['area'] < 20) |
-        #     #         (uncontained['way'].isin({
-        #     #             way.id()
-        #     #             for way in self.source.ways()
-        #     #             if way.tag('building') == 'roof'
-        #     #         }))
-        #     # )]
-        #     # garbage_relations: GeoDataFrame = uncontained[(
-        #     #         (uncontained['way'].isna()) &
-        #     #         (uncontained['area'] < 20) |
-        #     #         (uncontained['relation'].isin({
-        #     #             relation.id()
-        #     #             for relation in self.source.relations()
-        #     #             if relation.tag('building') == 'roof'
-        #     #         }))
-        #     # )]
-        #
-        #     self.ways['containment'] = pd.Series(np.nan, dtype='Int64')
-        #     self.ways['containment'].update(
-        #         containers
-        #             .loc[containers['way'].notna()]
-        #             .set_index('way')
-        #             .loc[:, 'containment']
-        #     )
-        #     self.ways['containment'].update(
-        #         contained
-        #             .loc[contained['way'].notna()]
-        #             .set_index('way')
-        #             .loc[:, 'containment']
-        #     )
-        #     self.relations['containment'] = pd.Series(np.nan, dtype='Int64')
-        #     self.relations['containment'].update(
-        #         containers
-        #             .loc[containers['way'].isna()]
-        #             .set_index('relation')
-        #             .loc[:, 'containment']
-        #     )
-        #     self.relations['containment'].update(
-        #         contained
-        #             .loc[contained['way'].isna()]
-        #             .set_index('relation')
-        #             .loc[:, 'containment']
-        #     )
-        #
+        data['geometry'] = data.geometry.to_crs(3857)
+        data['area'] = data.area
+
+        if self.footprint is not None and self.footprint is not self.__class__:
+            footprint = pd.Series(index=data.index)
+            # Use external footprint
+            try:
+                external = self.footprint._footprint
+                annoy = self.footprint._annoy
+            except AttributeError:
+                external: gpd.GeoDataFrame = self.footprint.aggregate[['geometry', 'centroid']]
+                external['geometry'] = external.to_crs(3857)
+                annoy = AnnoyIndex(2, 'euclidean')
+                for i, centroid in enumerate(external['centroid']):
+                    annoy.add_item(i, (centroid.x, centroid.y))
+                annoy.build(10)
+                self.footprint._annoy = annoy
+                self.footprint._footprint = external
+
+            for i, (c, a, g) in enumerate(data[['centroid', 'area', 'geometry']].values):
+                for n in annoy.get_nns_by_vector((c.x, c.y), 5):
+                    external = external.iloc[n]
+                    if not external['geometry'].intersects(g):
+                        continue
+                    if external['geometry'].intersection(g).area / a < .5:
+                        continue
+                    footprint.iloc[i] = footprint[n]
+
+            # Exclude anything that is not encapsulated by the external footprint
+            footprint = footprint[footprint.duplicated(keep=False)]
+
+
+        else:
+            # Use internal footprint
+            footprint = pd.Series(index=data.index)
+            data['buffer'] = data.buffer(1)
+            data['footprint'] = pd.Series(np.nan, dtype='Int64', index=data.index)
+            containers = data[data['container']]
+            contained = data[~data['container']]
+            containers.sort_values('area', ascending=False)
+            containers['footprint'] = range(len(containers))  # 0, 1, 2, 3...
+            # TODO: We are going to first build footprint using container absolute index, and then update the
+            #   the footprint column for all the rows.
+            annoy = AnnoyIndex(2, 'euclidean')
+            for i, centroid in enumerate(containers['centroid']):
+                annoy.add_item(i, (centroid.x, centroid.y))
+            annoy.build(10)
+
+            for i, (g, r) in enumerate(containers.geometry, containers['relation']):
+                for n in annoy.get_nns_by_item(i, 5):
+                    if i < n:
+                        continue
+                    if (containers.loc[n, 'relation'] == r) is True:  # Same relation redundant
+                        continue
+                    if not containers.loc[n, 'buffer'].contains(g):
+                        continue
+                    containers.loc[i, 'footprint'] = containers.loc[n, 'footprint']
+            footprint.update(containers['footprint'])
+
+            for i, g, r, a, c in zip(
+                    contained.index,
+                    contained.geometry,
+                    contained['relation'],
+                    contained['area'],
+                    contained['centroid']
+            ):
+                for n in annoy.get_nns_by_vector((c.x, c.y), 20):
+                    if (containers.loc[n, 'relation'] == r) is True:
+                        continue
+                    if containers.loc[n, 'area'] < a:
+                        continue
+                    if containers.loc[n, 'buffer'].contains(g):
+                        contained.loc[i, 'footprint'] = containers.loc[n, 'footprint']
+            footprint.update(contained['footprint'])
+
+        footprint = footprint[self.data.index]  # Retain original order because groupby.indices returns iloc
+        return footprint.groupby(footprint, dropna=True).indices.values()

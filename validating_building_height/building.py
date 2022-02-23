@@ -1,22 +1,85 @@
+import numpy.typing
 from typing import Optional, Iterator, Iterable
 
 import abc
 import datetime
 
+import numpy
 from geopandas import GeoDataFrame
+from pandas import Series
 
 from ValidateOSM.source import data, group, aggregate, Source, SourceOSM, BBox
 import dateutil.parser
 
+
 class SourceBuilding(Source, abc.ABC):
+    def identity(self) -> Optional[Series]:
+        # TODO: UBID
+        return None
+        return Series(None, name='ubid', index=self.aggregate.index)
+
+    def exclude(self) -> Optional[numpy.typing.NDArray[bool]]:
+        # TODO: Exclude things that are too tiny or are clutter
+
+        # TODO: How do we exclude uninteresting or 'garbage' entries? this is originally from SourceOSM
+
+        #     #   Perhpas it is not the duty of containment to determine
+        #     # garbage_ways: GeoDataFrame = uncontained[(
+        #     #         (uncontained['way'].notna()) &
+        #     #         (uncontained['area'] < 20) |
+        #     #         (uncontained['way'].isin({
+        #     #             way.id()
+        #     #             for way in self.source.ways()
+        #     #             if way.tag('building') == 'roof'
+        #     #         }))
+        #     # )]
+        #     # garbage_relations: GeoDataFrame = uncontained[(
+        #     #         (uncontained['way'].isna()) &
+        #     #         (uncontained['area'] < 20) |
+        #     #         (uncontained['relation'].isin({
+        #     #             relation.id()
+        #     #             for relation in self.source.relations()
+        #     #             if relation.tag('building') == 'roof'
+        #     #         }))
+        #     # )]
+        #
+        #     self.ways['containment'] = pd.Series(np.nan, dtype='Int64')
+        #     self.ways['containment'].update(
+        #         containers
+        #             .loc[containers['way'].notna()]
+        #             .set_index('way')
+        #             .loc[:, 'containment']
+        #     )
+        #     self.ways['containment'].update(
+        #         contained
+        #             .loc[contained['way'].notna()]
+        #             .set_index('way')
+        #             .loc[:, 'containment']
+        #     )
+        #     self.relations['containment'] = pd.Series(np.nan, dtype='Int64')
+        #     self.relations['containment'].update(
+        #         containers
+        #             .loc[containers['way'].isna()]
+        #             .set_index('relation')
+        #             .loc[:, 'containment']
+        #     )
+        #     self.relations['containment'].update(
+        #         contained
+        #             .loc[contained['way'].isna()]
+        #             .set_index('relation')
+        #             .loc[:, 'containment']
+        #     )
+        #
+        return None
+
     @data('object')
     @abc.abstractmethod
-    def address(self) -> Iterable[object]:
+    def address(self):
         """The address of the building"""
 
     @data('datetime64[ns]')
     @abc.abstractmethod
-    def start_date(self) -> Iterable[datetime.datetime]:
+    def start_date(self):
         """The date at which the building began construction"""
 
 

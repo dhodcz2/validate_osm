@@ -16,7 +16,7 @@ from validating_building_height.base import (
     Height, NeedlesHeight
 )
 from ValidateOSM.source.source import (
-    _BBox, BBox,
+    BBoxStruct, BBox,
 )
 from ValidateOSM.source import (
     Source,
@@ -24,13 +24,11 @@ from ValidateOSM.source import (
     data,
     aggregate,
     enumerative,
-    Static
 )
 
 
 class NewYork(Source, abc.ABC):
     bbox = BBox([40.70010232505462, -74.01998471326246, 40.750102666482995, -73.96432847885934])
-
     @data.identifier('Int64')
     @abc.abstractmethod
     def bin(self) -> Iterable[int]:
@@ -47,19 +45,24 @@ class NewYorkBuildingHeightNeedles(NeedlesHeight, NewYork):
 
 
 class NewYork3DModel(NewYork, Height):
-    static = Static(url="https://www1.nyc.gov/site/doitt/initiatives/3d-building.page", unzipped='DA_WISE_Multipatch')
+    resource = Static(
+        uri="https://www1.nyc.gov/site/doitt/initiatives/3d-building.page",
+        crs=2263,
+        flipped=True,
+        unzipped='DA_WISE_Multipatch'
+    )
     name = '3dm'
     link = 'https://www1.nyc.gov/site/doitt/initiatives/3d-building.page'
 
     @property
-    def raw(self) -> GeoDataFrame:
-        self.bbox.raw.crs = 2263
-        self.bbox.raw.flip = True
-        return self.static
+    def resource(self) -> GeoDataFrame:
+        # self.bbox.raw.crs = 2263
+        # self.bbox.raw.flip = True
+        return self.resource
 
     def height_m(self) -> Iterable[float]:
         METERS_PER_FOOT = .3048
-        for geometry in self.raw.geometry:
+        for geometry in self.resource.geometry:
             heights = {
                 geom.exterior.coords[0][2]
                 for geom in geometry.geoms
@@ -70,7 +73,7 @@ class NewYork3DModel(NewYork, Height):
         return np.nan
 
     def geometry(self) -> Iterable[shapely.geometry.base.BaseGeometry]:
-        return self.raw.geometry
+        return self.resource.geometry
 
     def address(self) -> Iterable[str]:
         return None
@@ -82,7 +85,7 @@ class NewYork3DModel(NewYork, Height):
         return datetime.datetime(2014, 1, 1)
 
     def bin(self):
-        return self.raw['BIN']
+        return self.resource['BIN']
 
 
 class NewYorkOpenCityModel(NewYork, Height):
@@ -107,15 +110,16 @@ class NewYorkOpenCityModel(NewYork, Height):
 
     # TODO: Temporary placeholder to just leverage one source that is particularly
     # TODO: This Static file is zipped with one file. Be certain this works without specification of unzipped contents
-    static = Static(
+    resource = Static(
         url='https://s3.dualstack.us-east-1.amazonaws.com/opencitymodel/2019-jun/gml/NewYork/36061/'
             'NewYork-36061-000.zip',
+        crs='epsg:4979'
     )
 
     @property
-    def raw(self) -> GeoDataFrame:
-        self.bbox.raw.crs = 'epsg:4979'
-        return self.static
+    def resource(self) -> GeoDataFrame:
+        self.bbox.resource.crs = 'epsg:4979'
+        return self.resource
 
     def height_m(self) -> Iterable[float]:
         return np.nan
@@ -124,7 +128,7 @@ class NewYorkOpenCityModel(NewYork, Height):
         return np.nan
 
     def geometry(self):
-        return self.raw.geometry
+        return self.resource.geometry
 
     def address(self):
         return None
@@ -142,16 +146,17 @@ class NewYorkOpenCityModel(NewYork, Height):
 class NewYorkLOD(NewYork, Height):
     link = 'https://www.asg.ed.tum.de/gis/projekte/new-york-city-3d/#c753'
     name = 'lod'
-    static = Static(
+    resource = Static(
         url='http://www.3dcitydb.net/3dcitydb/fileadmin/public/datasets/NYC/NYC_buildings_CityGML_LoD2/'
             'NYC_Buildings_LoD2_CityGML.zip',
-        unzipped='NYC_Buildings_LoD2_CityGML.gml'
+        unzipped='NYC_Buildings_LoD2_CityGML.gml',
+        crs=None,
     )
 
     @property
-    def raw(self) -> GeoDataFrame:
-        self.bbox.raw.crs = None
-        return self.static
+    def resource(self) -> GeoDataFrame:
+        self.bbox.resource.crs = None
+        return self.resource
 
     def height_m(self) -> Union[pd.Series, Iterable]:
         ...
