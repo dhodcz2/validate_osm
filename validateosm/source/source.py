@@ -24,10 +24,10 @@ from annoy import AnnoyIndex
 from geopandas import GeoSeries, GeoDataFrame
 from pandas import Series, DataFrame
 
-from ValidateOSM.source.static import StaticRegional, StaticBase, StaticNaive
-from ValidateOSM.source.aggregate import DescriptorAggregate, DecoratorAggregate
-from ValidateOSM.source.data import DecoratorData, DescriptorData
-from ValidateOSM.source.groups import (
+from validateosm.source.static import StaticRegional, StaticBase, StaticNaive
+from validateosm.source.aggregate import DescriptorAggregate, DecoratorAggregate
+from validateosm.source.data import DecoratorData, DescriptorData
+from validateosm.source.groups import (
     DescriptorGroup,
     DecoratorGroup,
 )

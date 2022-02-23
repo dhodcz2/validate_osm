@@ -1,11 +1,11 @@
 import datetime
 
 
-from ValidateOSM.source import *
-from ValidateOSM.source.static import File
+from validateosm.source import *
+from validateosm.source.static import File
 # TODO: For some reason if I do not specifically import from source.static instead of source,
 #   isinstance(files, File) in static.py will return False instead of True
-from validating_building_height.base import Height
+from validate_building_height.base import Height
 
 import abc
 

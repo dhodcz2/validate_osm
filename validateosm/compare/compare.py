@@ -35,7 +35,6 @@ class Where:
     If n is not a Needle, returns index of the source.
     """
 
-
     def __get__(self, instance, owner):
         self.compare: 'Compare' = instance
         self.compare.plot: 'Plot'
@@ -91,13 +90,12 @@ class Values:
         # }
         #
 
-
     def oned(self, left: str, right: str, how='percent') -> DataFrame:
         gdf_left: GeoDataFrame = self.compare.gdf.loc[idx[:, :, left], :]
         gdf_right: GeoDataFrame = self.compare.gdf.loc[idx[:, :, right], :]
         i = (
             gdf_left.index.get_level_values('i')
-            .intersection(gdf_right.index.get_level_values('i'))
+                .intersection(gdf_right.index.get_level_values('i'))
         )
         if how == 'percent':
             result = {
@@ -110,43 +108,45 @@ class Values:
             ...
         else:
             raise ValueError(how)
-        Compares one Source with another
+        Compares
+        one
+        Source
+        with another
 
-        # gdf_left: GeoDataFrame = self.compare.gdf.loc[idx[:, ]]
+    # gdf_left: GeoDataFrame = self.compare.gdf.loc[idx[:, ]]
 
-        # if left in self.memo and right in self.memo[left]:
-        #     return self.memo[left][right]
-        # loc = pd.Index.union(
-        #     self.compare.xs(left, level='name').index,
-        #     self.compare.xs(right, level='name').index
-        # )
-        # gdf_left: DataFrame = self.compare.loc[idx[loc, left]]
-        # gdf_right: DataFrame = self.compare.loc[idx[loc, right]]
-        # if how == 'percent':
-        #     result = DataFrame({
-        #         v: {
-        #             (r - l) / r
-        #             if r > l else
-        #             (l - r) / l
-        #             for l, r in zip(gdf_left[v], gdf_right[v])
-        #         }
-        #         for v in self.validating
-        #     }, index=loc)
-        # elif how == 'abs':
-        #     result = DataFrame({
-        #         v: {
-        #             abs(l - r)
-        #             for l, r in zip(gdf_left[v], gdf_right[v])
-        #         }
-        #         for v in self.validating
-        #     }, index=loc)
-        # else:
-        #     raise ValueError(how)
-        # self.memo[left][right] = result
-        # self.memo[right][left] = result
-        # return result
-        #
-
+    # if left in self.memo and right in self.memo[left]:
+    #     return self.memo[left][right]
+    # loc = pd.Index.union(
+    #     self.compare.xs(left, level='name').index,
+    #     self.compare.xs(right, level='name').index
+    # )
+    # gdf_left: DataFrame = self.compare.loc[idx[loc, left]]
+    # gdf_right: DataFrame = self.compare.loc[idx[loc, right]]
+    # if how == 'percent':
+    #     result = DataFrame({
+    #         v: {
+    #             (r - l) / r
+    #             if r > l else
+    #             (l - r) / l
+    #             for l, r in zip(gdf_left[v], gdf_right[v])
+    #         }
+    #         for v in self.validating
+    #     }, index=loc)
+    # elif how == 'abs':
+    #     result = DataFrame({
+    #         v: {
+    #             abs(l - r)
+    #             for l, r in zip(gdf_left[v], gdf_right[v])
+    #         }
+    #         for v in self.validating
+    #     }, index=loc)
+    # else:
+    #     raise ValueError(how)
+    # self.memo[left][right] = result
+    # self.memo[right][left] = result
+    # return result
+    #
 
     def twod(self, defendant: str, how='percent') -> DataFrame:
         # MultiIndex(index, validating) -> [name]
@@ -203,7 +203,6 @@ class Plot:
         self.compare.plot: 'Plot'
         self.compare.where: 'Where'
 
-
     def what(
             self,
             v: str,
@@ -218,7 +217,6 @@ class Plot:
         :return:
         """
         gdf = self.gdf.loc[idx[i, v, n], n]
-
 
     # def where(self, v: str, i: Optional[Collection[int]] = None, n: Optional[Collection[str]] = None):
     def where(
@@ -313,15 +311,18 @@ class Compare:
 
         gdfs: Iterator[GeoDataFrame] = (
             source
-            .from_abstraction()
-            .__getitem__(self.validating)
-            .unstack()
-            .swaplevel(0,1)
-            .assign(n=source.name)
-            .set_index('n', append=True)
+                .from_abstraction()
+                .__getitem__(self.validating)
+                .unstack()
+                .swaplevel(0, 1)
+                .assign(n=source.name)
+                .set_index('n', append=True)
             for source in sources
         )
-        self.gdf: GeoDataFrame = Source.concat(gdfs)
+        # TODO: I have taken concat out of Source because it only seems to be needed in Source.data;
+        #   Compare should return DataFrames and not GeoDataFrames
+        # self.gdf: GeoDataFrame = Source.concat(gdfs)
+
 
 Compare.values: Values
 Compare.plot: Plot

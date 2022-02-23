@@ -7,7 +7,7 @@ from typing import Iterable, Iterator
 import numpy as np
 import pandas as pd
 
-from ValidateOSM.source import (
+from validateosm.source import (
     Source,
     SourceOSM,
     data,
@@ -15,8 +15,7 @@ from ValidateOSM.source import (
     aggregate,
     enumerative
 )
-
-from validating_building_height.building import (
+from validate_building_height.building import (
     SourceBuilding, SourceOSMBuilding
 )
 

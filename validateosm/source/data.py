@@ -14,8 +14,8 @@ from geopandas import GeoSeries
 from pandas import Series
 from pandas.core.indexes.range import RangeIndex
 
-from ValidateOSM.source.pipe import DescriptorPipeSerialize
-from ValidateOSM.source.scripts import concat
+from validateosm.source.pipe import DescriptorPipeSerialize
+from validateosm.util.scripts import concat
 
 
 @dataclasses.dataclass
@@ -126,7 +126,7 @@ class CacheStructs(UserDict):
     """
 
     def __missing__(self, source: type) -> dict[str, StructData]:
-        from ValidateOSM.source import Source
+        from validateosm.source import Source
         sources: Iterator[Type[Source]] = [
             s for s in source.mro()[::-1]
             if issubclass(s, Source)
@@ -278,7 +278,7 @@ class CacheData(UserDict):
     #     self._instance.static = sources
     #
     # def resolve(self) -> GeoDataFrame:
-    #     from ValidateOSM.source.source import Source
+    #     from validateosm.source.source import Source
     #     instance: Source = self._instance
     #     self._source: Type[Source]
     #     if isinstance(self._instance.static, Iterator):

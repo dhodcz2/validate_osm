@@ -1,37 +1,16 @@
-import itertools
-
-from ValidateOSM.source.pipe import DescriptorPipe
-from ValidateOSM.source.pipe import DescriptorPipeSerialize
-import os
-from collections import UserDict
-import geopandas as gpd
-from weakref import WeakKeyDictionary
-from pathlib import Path
-from weakref import WeakKeyDictionary
-
-import numpy as np
-import pandas as pd
-from annoy import AnnoyIndex
-from itertools import chain
-
-from pandas import Series
-
-from typing import Iterator, Collection, Union, Iterable, Type, Optional, Generator
-
-import geopandas as gpd
-
 import dataclasses
-from pathlib import Path
-
-import functools
 import inspect
 import warnings
+from collections import UserDict
+from typing import Callable, Iterator, Union, Any, Type
+from typing import Optional
+from weakref import WeakKeyDictionary
 
 import pandas
 from geopandas import GeoDataFrame, GeoSeries
-from sys import _getframe
 from pandas import Series
-from typing import Callable, Iterator, Union, Any, Type
+
+from validateosm.source.pipe import DescriptorPipe
 
 
 @dataclasses.dataclass
@@ -117,7 +96,7 @@ class CacheStructs(UserDict):
         self.data: WeakKeyDictionary[object, StructAggregate] = WeakKeyDictionary()
 
     def __missing__(self, source: type):
-        from ValidateOSM.source import Source
+        from validateosm.source import Source
         sources: Iterator[Type[Source]] = (s for s in source.mro()[::-1] if issubclass(s, Source))
         sources = list(sources)
         structs: dict[str: StructAggregate] = getattr(source, '_aggregate')

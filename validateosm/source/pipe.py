@@ -17,7 +17,7 @@ class DescriptorPipe:
     def __get__(self, instance, owner):
         if instance in self._cache:
             return self._cache[instance]
-        from ValidateOSM.source import Source
+        from validateosm.source import Source
         self._instance: Source = instance
         self._owner: Type[Source] = owner
         # self._instance = instance
@@ -37,7 +37,7 @@ class DescriptorPipeSerialize(DescriptorPipe, abc.ABC):
     _cache = WeakKeyDictionary[object, gpd.GeoDataFrame]
 
     def __get__(self, instance, owner):
-        from ValidateOSM.source import Source
+        from validateosm.source import Source
         self._instance: Source = instance
         self._owner: Type[Source] = owner
         if instance is not None and instance not in self._cache:

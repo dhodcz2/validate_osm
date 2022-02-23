@@ -15,8 +15,8 @@ import requests
 import shapely.geometry
 from shapely.geometry import Polygon
 
-from ValidateOSM.args import global_args as project_args
-from ValidateOSM.source.scripts import concat
+from validateosm.args import global_args as project_args
+from validateosm.util.scripts import concat
 
 
 @dataclasses.dataclass(repr=False)
@@ -98,7 +98,7 @@ class StaticBase(abc.ABC):
 
     def read_file(self, file: File) -> pd.DataFrame:
         gdf: Union[gpd.GeoDataFrame, pd.DataFrame]
-        from ValidateOSM.source import Source
+        from validateosm.source import Source
         owner: Optional[Source] = getattr(self, '_owner', None)
         if owner is not None:
             bbox = owner.bbox.resource.cartesian
@@ -206,7 +206,7 @@ class StaticNaive(StaticBase):
         self._cache = None
 
     def __get__(self, instance, owner):
-        from ValidateOSM.source import Source
+        from validateosm.source import Source
         self._owner: Source = owner
         self._instance: Type[Source] = instance
         if self._instance is None:
@@ -283,7 +283,7 @@ class StaticRegional(StaticBase, abc.ABC):
         return self.read_files(files)
 
     def __get__(self, instance, owner) -> gpd.GeoDataFrame:
-        from ValidateOSM.source import Source
+        from validateosm.source import Source
         self._instance = instance
         self._owner: Type[Source] = owner
         return self[self._owner.bbox.resource.cartesian]

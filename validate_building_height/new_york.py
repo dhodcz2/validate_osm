@@ -4,21 +4,21 @@ import geopandas as gpd
 import datetime
 from typing import Iterable, Union
 
-# from ValidateOSM.data import Source, Identifier, Validating, NonEssentialData, EssentialData, Haystack
+# from validateosm.data import Source, Identifier, Validating, NonEssentialData, EssentialData, Haystack
 import numpy as np
 import pandas as pd
 import shapely.geometry.base
 from geopandas import GeoDataFrame
 
-from ValidateOSM.config import ROOT
-# from validating_building_height.base import Height, NeedlesHeight
+from validateosm.config import ROOT
+# from validate_building_height.base import Height, NeedlesHeight
 from validating_building_height.base import (
     Height, NeedlesHeight
 )
-from ValidateOSM.source.source import (
+from validateosm.source.source import (
     BBoxStruct, BBox,
 )
-from ValidateOSM.source import (
+from validateosm.source import (
     Source,
     SourceOSM,
     data,

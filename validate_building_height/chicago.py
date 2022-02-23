@@ -8,15 +8,18 @@ import pandas as pd
 import shapely.geometry
 from geopandas import GeoDataFrame
 
-from ValidateOSM.source import (
+from validate_building_height.base import (
+    Height,
+    NeedlesHeight
+)
+from validateosm.source import (
     BBox
 )
-from ValidateOSM.source import (
+from validateosm.source import (
     data, enumerative,
 )
-from ValidateOSM.source.static import (StaticRegional, StaticURL)
-from validating_building_height.base import (
-    Height, NeedlesHeight,
+from validateosm.source.static import (
+    StaticNaive, File
 )
 
 
@@ -43,7 +46,9 @@ class ChicagoBuildingFootprints(Chicago, Height):
     #   and enforce definition for non-ABCs
     name = 'cbf'
     link = 'https://data.cityofchicago.org/Buildings/Building-Footprints-current-/hz9b-7nh8'
-    resource = StaticURL(url='https://data.cityofchicago.org/api/geospatial/hz9b-7nh8?method=export&format=GeoJSON')
+    resource = StaticNaive(
+        files=File(url='https://data.cityofchicago.org/api/geospatial/hz9b-7nh8?method=export&format=GeoJSON')
+    )
 
     @functools.cached_property
     def resource(self) -> GeoDataFrame:

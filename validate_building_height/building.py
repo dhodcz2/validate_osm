@@ -8,7 +8,7 @@ import numpy
 from geopandas import GeoDataFrame
 from pandas import Series
 
-from ValidateOSM.source import data, group, aggregate, Source, SourceOSM, BBox
+from validateosm.source import data, group, aggregate, Source, SourceOSM, BBox
 import dateutil.parser
 
 

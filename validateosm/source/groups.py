@@ -1,21 +1,15 @@
-import inspect
-from ValidateOSM.source.pipe import DescriptorPipe
-import sqlite3
-import itertools
-from collections import UserDict
-
-import functools
-from pathlib import Path
-
-import numpy as np
-import pandas as pd
-from geopandas import GeoDataFrame
 import dataclasses
-from typing import Iterable, Callable, Optional, Type, Collection, Iterator, Generator
+import functools
+import inspect
+from collections import UserDict
+from typing import Callable, Collection, Generator
 from weakref import WeakKeyDictionary
+
 import networkx
+from geopandas import GeoDataFrame
 from networkx.algorithms.components.connected import connected_components
-import weakref
+
+from validateosm.source.pipe import DescriptorPipe
 
 
 @dataclasses.dataclass
@@ -101,7 +95,7 @@ class CacheStructs(UserDict):
         self.data: WeakKeyDictionary[type, set[DecoratorGroup.Struct]] = WeakKeyDictionary()
 
     def __missing__(self, source: type):
-        from ValidateOSM.source import Source
+        from validateosm.source import Source
         structs: set[DecoratorGroup.Struct] = {
             struct
             for c in source.mro()[::-1]
@@ -124,7 +118,7 @@ class CacheGroups(UserDict):
         self.structs: CacheStructs[type, set[DecoratorGroup.Struct]] = CacheStructs()
 
     def __missing__(self, source: object) -> Groups:
-        from ValidateOSM.source import Source
+        from validateosm.source import Source
         source: Source
         structs = self.structs[source.__class__]
         groups = (
@@ -162,15 +156,3 @@ class DescriptorGroup(DescriptorPipe):
     def __get__(self, instance, owner) -> Groups:
         return super(DescriptorGroup, self).__get__(instance, owner)
 
-{
-    'A': {
-        'osm' ...
-    },
-    'B': {
-        'osm': ...
-    },
-    'AB': {
-        'osm': ...,
-        'msbf': ...
-    }
-}

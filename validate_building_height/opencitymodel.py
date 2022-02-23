@@ -3,17 +3,10 @@ from typing import Iterable
 
 import numpy as np
 import pandas as pd
-import shapely.geometry
 from geopandas import GeoDataFrame
 
-from ValidateOSM.source import (
-    BBox,
-    Source,
-    SourceOSM,
-    data,
-    aggregate,
-    enumerative,
-    StaticNaive
+from validateosm.source import (
+    Source
 )
 
 
@@ -41,7 +34,7 @@ from ValidateOSM.source import (
 #
 #         # TODO: For now pretend that it's a GeoDataFrame that is returned.
 #         self.reference: GeoDataFrame = pd.read_csv(
-#             "/home/arstneio/PycharmProjects/ValidateOSM/validating_building_height/"
+#             "/home/arstneio/PycharmProjects/validateosm/validate_building_height/"
 #             "us-hhs-gov-1456181d-b0eb-4c1c-aa4e-4900fe1cbfa2/data/csv_1.csv"
 #         )
 #

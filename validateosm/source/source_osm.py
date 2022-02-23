@@ -3,11 +3,11 @@ import dataclasses
 import math
 from collections import UserList
 from weakref import WeakKeyDictionary
-from ValidateOSM.source.data import CacheData
+from validateosm.source.data import CacheData
 from typing import ValuesView, Union, Collection, Generator
 
 import psutil
-from ValidateOSM.source.source import DescriptorData
+from validateosm.source.source import DescriptorData
 
 import abc
 import functools
@@ -26,8 +26,8 @@ from geopandas import GeoDataFrame, GeoSeries
 from pandas import Series
 from shapely.geometry import Polygon
 
-from ValidateOSM.source.source import Source
-from ValidateOSM.source.groups import (
+from validateosm.source.source import Source
+from validateosm.source.groups import (
     DecoratorGroup
 )
 

@@ -1,31 +1,19 @@
-import re
-
-import warnings
-
-import boto3
-
-from botocore import UNSIGNED
-from botocore.client import Config
-from botocore.handlers import disable_signing
-import abc
 import functools
-
-import geopandas
-import pandas as pd
-import shapely.geometry
-
-from ValidateOSM.args import global_args
-import itertools
+import re
+import warnings
+from typing import Generator
 from typing import Iterable
 from typing import Union, Iterator
 
-import bs4
-import requests
-
-from ValidateOSM.source.static import StaticRegional, File
-from shapely.geometry import Polygon
+import boto3
 import geopandas as gpd
-from typing import Generator
+import pandas as pd
+from botocore import UNSIGNED
+from botocore.client import Config
+from botocore.handlers import disable_signing
+from shapely.geometry import Polygon
+
+from validateosm.source.static import StaticRegional, File
 
 
 # TODO: How do we query for bbox with large, regionally defined datasets?
