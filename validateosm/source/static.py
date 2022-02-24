@@ -96,31 +96,31 @@ class StaticBase(abc.ABC):
 
     directory = classmethod(property(directory))
 
-    def read_file(self, file: File) -> pd.DataFrame:
+    @classmethod
+    def _from_file(
+            cls,
+            file: File,
+            bbox: Optional[shapely.geometry.Polygon] = None,
+            columns: Optional[list[str]] = None
+    ) -> Union[pd.DataFrame, gpd.GeoDataFrame]:
         gdf: Union[gpd.GeoDataFrame, pd.DataFrame]
         from validateosm.source import Source
-        owner: Optional[Source] = getattr(self, '_owner', None)
-        if owner is not None:
-            bbox = owner.bbox.resource.cartesian
-        else:
-            bbox = None
-
         match file.name.rpartition('.')[2]:
             # TODO: Try to laod with geopandas if possible so that bbox can reduce memory load
             case 'feather':
                 try:
-                    gdf = gpd.read_feather(file.path, columns=self.columns)
+                    gdf = gpd.read_feather(file.path, columns=columns)
                 except (AttributeError, TypeError):
-                    gdf = pd.read_feather(file.path, columns=self.columns)
+                    gdf = pd.read_feather(file.path, columns=columns)
                 if isinstance(gdf, gpd.GeoDataFrame) and bbox is not None:
                     gdf = gdf[gdf.within(bbox)]
                 if project_args.debug:
                     gdf = gdf.head(100)
             case 'parquet':
                 try:
-                    gdf = gpd.read_parquet(file.path, columns=self.columns)
+                    gdf = gpd.read_parquet(file.path, columns=columns)
                 except (AttributeError, TypeError):
-                    gdf = pd.read_parquet(file.path, columns=self.columns)
+                    gdf = pd.read_parquet(file.path, columns=columns)
                 if isinstance(gdf, gpd.GeoDataFrame) and bbox is not None:
                     gdf = gdf[gdf.within(bbox)]
                 if project_args.debug:
@@ -132,7 +132,13 @@ class StaticBase(abc.ABC):
                     raise NotImplementedError from e
         return gdf
 
-    def read_files(self, files: list[File]) -> gpd.GeoDataFrame:
+    @classmethod
+    def _from_files(
+            cls,
+            files: list[File],
+            bbox: Optional[shapely.geometry.Polygon] = None,
+            columns: Optional[list[str]] = None
+    ) -> Union[pd.DataFrame, gpd.GeoDataFrame]:
         to_get = [
             file for file in files
             if not file.path.exists()
@@ -161,7 +167,7 @@ class StaticBase(abc.ABC):
                 print('done!')
 
         dfs: Union[Iterator[gpd.GeoDataFrame], Iterator[pd.DataFrame]] = (
-            self.read_file(file)
+            cls._from_file(file, bbox, columns)
             for file in files
         )
         if len(files) > 1:
@@ -175,6 +181,11 @@ class StaticBase(abc.ABC):
             # TODO: If the dataset is in a different crs, where is the most scalable location
             #   to transform that back to 4326?
         return result
+
+    @classmethod
+    @abc.abstractmethod
+    def from_files(cls) -> gpd.GeoDataFrame:
+        ...
 
     def __iter__(self) -> Iterator:
         ...
@@ -212,8 +223,12 @@ class StaticNaive(StaticBase):
         if self._instance is None:
             return self
         if self._cache is None:
-            self._cache = self.read_files(self.files)
+            self._cache = self._from_files(self.files)
         return self._cache
+
+    @classmethod
+    def from_files(cls) -> gpd.GeoDataFrame:
+        return cls._from_files(cls.files, columns=cls.columns)
 
 
 class StaticRegional(StaticBase, abc.ABC):
@@ -280,7 +295,7 @@ class StaticRegional(StaticBase, abc.ABC):
                     raise TypeError(item)
 
         files = list(gen())
-        return self.read_files(files)
+        return self._from_files(files)
 
     def __get__(self, instance, owner) -> gpd.GeoDataFrame:
         from validateosm.source import Source
@@ -300,3 +315,6 @@ class StaticRegional(StaticBase, abc.ABC):
                     return False
             case _:
                 raise TypeError(item)
+
+    def from_files(cls) -> gpd.GeoDataFrame:
+        raise NotImplementedError

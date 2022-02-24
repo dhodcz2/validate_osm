@@ -30,8 +30,8 @@ from validateosm.source.data import DecoratorData, DescriptorData
 from validateosm.source.groups import (
     DescriptorGroup,
     DecoratorGroup,
+    Groups
 )
-
 
 
 @dataclasses.dataclass
@@ -39,6 +39,7 @@ class BBoxStruct:
     ellipsoidal: shapely.geometry.Polygon
     cartesian: shapely.geometry.Polygon
     crs: Any
+
     # _crs: Any = dataclasses.field(init=False, repr=False)
 
     # def __post_init__(self):
@@ -78,6 +79,8 @@ class BBoxStruct:
     #     else:
     #         self._crs = val
     #
+
+
 # TODO: BBox understands its recipient; if
 
 class BBox:
@@ -127,6 +130,7 @@ class BBox:
         else:
             return self._cache_static[self._owner]
 
+
 class Source(abc.ABC):
     '''
     raw >> data >> groups >> aggregate >> identity >> exclude >> batch
@@ -150,13 +154,11 @@ class Source(abc.ABC):
 
     resource = (property(abc.abstractmethod(resource)))
 
-
     def identity(self) -> Optional[Series]:
         """ Iterates across Source.aggregate and yields keys that will determine the index of Source.batch"""
 
     def exclude(self) -> Optional[numpy.typing.NDArray[bool]]:
         """ Iterates across Source.aggregate and yields True if entry is to be excluded from Source.batch """
-
 
     def footprint(cls) -> Optional['Source']:
         """
@@ -167,18 +169,15 @@ class Source(abc.ABC):
 
     footprint = classmethod(property(footprint))
 
-
     def name(cls) -> str:
         """A short, abbreviated name that may be used for quickly selecting a specific source."""
 
     name = classmethod(property(abc.abstractmethod(name)))
 
-
     def link(cls) -> str:
         """A link to the page for further data regarding the Source"""
 
     link = classmethod(property(abc.abstractmethod(link)))
-
 
     def bbox(cls) -> BBox:
         """A BBox which represents the bounds of which relevant data from the Source is extracted."""
@@ -346,7 +345,7 @@ class Source(abc.ABC):
                     break
 
         footprints = footprints[self.data.index]  # Retain original order because groupby.indices returns iloc
-        groups =  footprints.groupby(footprints, dropna=True).indices.values()
+        groups = footprints.groupby(footprints, dropna=True).indices.values()
         return groups
 
 
