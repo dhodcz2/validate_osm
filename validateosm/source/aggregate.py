@@ -36,7 +36,7 @@ class StructAggregate:
 
     @property
     def decorated_func(self) -> Callable:
-        def wrapper(source: type):
+        def wrapper(source: object):
             obj: object = self.func(source)
             if self.dtype == 'geometry':
                 if self.crs is None:
@@ -62,6 +62,7 @@ class StructAggregate:
             return obj
 
         return wrapper
+
 
 
 class DecoratorAggregate:

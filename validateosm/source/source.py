@@ -32,6 +32,7 @@ from validateosm.source.groups import (
     DecoratorGroup,
     Groups
 )
+from validateosm.source.identifier import DescriptorIdentify
 
 
 @dataclasses.dataclass
@@ -154,9 +155,6 @@ class Source(abc.ABC):
 
     resource = (property(abc.abstractmethod(resource)))
 
-    def identity(self) -> Optional[Series]:
-        """ Iterates across Source.aggregate and yields keys that will determine the index of Source.batch"""
-
     def exclude(self) -> Optional[numpy.typing.NDArray[bool]]:
         """ Iterates across Source.aggregate and yields True if entry is to be excluded from Source.batch """
 
@@ -190,12 +188,7 @@ class Source(abc.ABC):
         """The specific columns that will be validated"""
         return cls.data.validating
 
-    @classmethod
-    @property
-    def identifier(cls) -> set[str]:
-        """The identifier(s) that may be used to establish help establish relationships
-         both between and across datasets"""
-        return cls.data.identifier
+    identify = DescriptorIdentify()
 
     @DecoratorData(dtype='geometry', crs=4326)
     @abc.abstractmethod
@@ -283,71 +276,3 @@ class Source(abc.ABC):
     #     return Path(inspect.getfile(cls)).parent / 'resources' / cls.__name__
     #
     # directory = classmethod(property(directory))
-
-    @DecoratorGroup(name='footprint')
-    def _(self) -> ValuesView[Collection[int]]:
-        data: gpd.GeoDataFrame = self.data[['centroid', 'geometry']]
-        data['geometry'] = data['geometry'].to_crs(3857)
-        data['area'] = data.area
-
-        if self.footprint is not None and self.footprint is not self.__class__:
-            # Use external footprint
-            footprint = pd.Series(index=data.index)
-            try:
-                external_footprint = self.footprint._footprint
-                annoy = self.footprint._annoy
-            except AttributeError:
-                external_footprint: gpd.GeoDataFrame = self.footprint.aggregate[['geometry', 'centroid']]
-                external_footprint['geometry'] = external_footprint.to_crs(3857)
-                annoy = AnnoyIndex(2, 'euclidean')
-                for i, centroid in enumerate(external_footprint['centroid']):
-                    annoy.add_item(i, (centroid.x, centroid.y))
-                annoy.build(10)
-                # TODO: Does it cause memory issues to store annoy and footprint in the Source class for reuse?
-                self.footprint._annoy = annoy
-                self.footprint._footprint = external_footprint
-
-            for i, (c, a, g) in enumerate(data[['centroid', 'area', 'geometry']].values):
-                for n in annoy.get_nns_by_vector((c.x, c.y), 5):
-                    external = external_footprint.iloc[n]
-                    if not external['geometry'].intersects(g):
-                        continue
-                    if external['geometry'].intersection(g).area / a < .5:
-                        continue
-                    footprint.iloc[i] = n
-                    break
-
-            # Exclude anything that is not encapsulated by the external footprint
-            footprint = footprint[footprint.duplicated(keep=False)]
-
-
-        else:
-            # Use internal footprint
-            data['buffer'] = data['geometry'].buffer(1)
-            data.sort_values(by='area', ascending=False)
-            footprints = pd.Series(range(len(data)), index=data.index)
-
-            annoy = AnnoyIndex(2, 'euclidean')
-            for i, centroid in enumerate(data['centroid']):
-                annoy.add_item(i, (centroid.x, centroid.y))  # lower i means higher area
-            annoy.build(10)
-
-            for i, (g, a) in enumerate(data[['geometry', 'area']].values):
-                for n in annoy.get_nns_by_item(i, 10):
-                    if i < n:  # If the neighbor is smaller
-                        continue
-                    footprint = data.iloc[n]
-                    if not footprint['buffer'].contains(g):  # If footprint doesn't fully contain g
-                        continue
-                    # Because we are descending in size, we know that all entries will have the index
-                    # of the largest segment of the group
-                    footprints.iloc[i] = footprints.iloc[n]
-                    break
-
-        footprints = footprints[self.data.index]  # Retain original order because groupby.indices returns iloc
-        groups = footprints.groupby(footprints, dropna=True).indices.values()
-        return groups
-
-
-{
-}

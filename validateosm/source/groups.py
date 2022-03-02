@@ -29,6 +29,23 @@ class Groups:
     def ungrouped(self) -> GeoDataFrame:
         return self._data.iloc[self._ungrouped]
 
+    def __len__(self) -> int:
+        return len(self._ungrouped) + len(self._grouped)
+
+
+@dataclasses.dataclass
+class StructGroup:
+    name: str
+    func: Callable
+    dependent: bool
+
+    def __hash__(self):
+        return hash(self.name)
+
+    def __eq__(self, other):
+        return self.name == other
+
+
 class DecoratorGroup:
     """
     for n in N:
@@ -41,18 +58,6 @@ class DecoratorGroup:
         if n is grouped in a len 1 array:
             it is included in aggregate
     """
-
-    @dataclasses.dataclass
-    class Struct:
-        name: str
-        func: Callable
-        dependent: bool
-
-        def __hash__(self):
-            return hash(self.name)
-
-        def __eq__(self, other):
-            return self.name == other
 
     def __init__(self, name: str, dependent: str = None):
         self.name = name
@@ -77,7 +82,7 @@ class DecoratorGroup:
         frame = inspect.currentframe()
         frames = inspect.getouterframes(frame)
         frame = frames[1]
-        frame.frame.f_locals.setdefault('_group', {})[self.name] = DecoratorGroup.Struct(
+        frame.frame.f_locals.setdefault('_group', {})[self.name] = StructGroup(
             name=self.name,
             func=func,
             dependent=self.dependent
@@ -92,11 +97,11 @@ class CacheStructs(UserDict):
 
     def __init__(self):
         super(CacheStructs, self).__init__()
-        self.data: WeakKeyDictionary[type, set[DecoratorGroup.Struct]] = WeakKeyDictionary()
+        self.data: WeakKeyDictionary[type, set[StructGroup]] = WeakKeyDictionary()
 
     def __missing__(self, source: type):
         from validateosm.source import Source
-        structs: set[DecoratorGroup.Struct] = {
+        structs: set[StructGroup] = {
             struct
             for c in source.mro()[::-1]
             if issubclass(c, Source) and hasattr(c, '_group')
@@ -110,12 +115,12 @@ class CacheGroups(UserDict):
     """
     Caches the Groups with regards to a class
     """
-    _cache: CacheStructs[type, set[DecoratorGroup.Struct]] = CacheStructs()
+    _cache: CacheStructs[type, set[StructGroup]] = CacheStructs()
 
     def __init__(self):
         super(CacheGroups, self).__init__()
         self.data: WeakKeyDictionary[object, Groups] = WeakKeyDictionary()
-        self.structs: CacheStructs[type, set[DecoratorGroup.Struct]] = CacheStructs()
+        self.structs: CacheStructs[type, set[StructGroup]] = CacheStructs()
 
     def __missing__(self, source: object) -> Groups:
         from validateosm.source import Source
@@ -151,8 +156,14 @@ class CacheGroups(UserDict):
 
 
 class DescriptorGroup(DescriptorPipe):
-    _cache = CacheGroups()
+    _cache: WeakKeyDictionary[object, Groups] = CacheGroups()
 
     def __get__(self, instance, owner) -> Groups:
         return super(DescriptorGroup, self).__get__(instance, owner)
+
+    def __set__(self, instance, value):
+        self._cache[instance] = value
+
+
+
 

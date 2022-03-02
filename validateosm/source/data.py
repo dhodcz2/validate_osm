@@ -47,7 +47,9 @@ class StructData:
                     obj = GeoSeries(obj, crs=None)
                 else:
                     if not isinstance(obj, GeoSeries):
-                        raise TypeError(f"{self.func.__qualname__} must be returned as a GeoSeries so that it may specify a CRS.")
+                        raise TypeError(
+                            f"{self.func.__qualname__} must be returned as a GeoSeries so that it may specify a CRS."
+                        )
                     if obj.crs is None:
                         raise ValueError(f"{obj} must specify a CRS.")
                     obj = obj.to_crs(self.crs)
@@ -106,11 +108,11 @@ class DecoratorData(_DecoratorData):
         datasets.
     """
 
-    class identifier(_DecoratorData):
-        """
-        In addition to wrapping a function as @data, this marks a particular column as being able to be used as a
-        identifier to indicate relationships across datasets.
-        """
+    # class identifier(_DecoratorData):
+    #     """
+    #     In addition to wrapping a function as @data, this marks a particular column as being able to be used as a
+    #     identifier to indicate relationships across datasets.
+    #     """
 
     class validate(_DecoratorData):
         """
@@ -234,7 +236,7 @@ class CacheData(UserDict):
                 if len(series) == 1
                 else series
             )
-            for name, series  in indie.items()
+            for name, series in indie.items()
         })
 
         # Extract data that is dependent on data that has been extracted.
