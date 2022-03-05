@@ -1,33 +1,72 @@
+import functools
+import itertools
+from typing import Generator, Union, Collection
 from typing import Hashable
-import numpy as np
-from shapely.geometry.base import BaseGeometry
+
 import geopandas as gpd
+import networkx
 import pandas as pd
 import shapely
 from annoy import AnnoyIndex
-import functools
-from typing import ValuesView, Collection, Generator, Union, Type
+from geopandas import GeoDataFrame
+from networkx import connected_components
+from shapely.geometry.base import BaseGeometry
 
 
-class DescriptorFootprint:
-    def __get__(self, instance, owner):
+class Footprint:
+    # TODO: Footprint cannot be used as a descriptor because it is a member of Source
+
+    def __init__(self, compare: object):
         from validateosm.compare.compare import Compare
-        self._instance: Compare = instance
-        self._owner: Type[Compare] = owner
-        return self
-
-    def __delete__(self, instance):
-        del self.footprints
+        if not isinstance(compare, Compare):
+            raise TypeError(compare)
+        else:
+            self.compare = compare
 
     def __len__(self):
         return len(self.footprints)
 
     @functools.cached_property
-    def footprints(self) -> gpd.GeoSeries:
-        # TODO: Why isn't len(footprints) < len(data)?
-        data = self._instance.data[['geometry', 'centroid']]
+    def footprints(self) -> GeoDataFrame:
+        # Because instance.redo == True, this will cause another recursion of instance.data
+        data = self.compare.data[['geometry', 'centroid']].copy()
         data['geometry'] = data['geometry'].to_crs(3857)
         data['centroid'] = data['centroid'].to_crs(3857)
+
+        # FIrst, aggregate the geometries where relation or way are identical.
+        G = networkx.Graph()
+        for way in data.groupby('way').indices.values():
+            G.add_nodes_from(way)
+            G.add_edges_from(zip(way[:-1], way[1:]))
+        for relation in data.groupby('relation').indices.values():
+            G.add_nodes_from(relation)
+            G.add_edges_from(zip(relation[:-1], relation[1:]))
+        groups = connected_components(G)
+        grouped: list[Collection[int]] = [
+            group for group in groups
+            if len(group) > 1
+        ]
+        ungrouped: set[int] = set(range(len(data))).difference(itertools.chain.from_iterable(grouped))
+        ungrouped: list[int] = list(ungrouped)
+
+        def geometry() -> Generator[shapely.geometry.Polygon, None, None]:
+            geom = data['geometry']
+            yield from geom.iloc[ungrouped]
+            for iloc in grouped:
+                yield geom.iloc[iloc].unary_union
+
+        def centroid() -> Generator[shapely.geometry.Point, None, None]:
+            cent = data['centroid']
+            yield from cent.iloc[ungrouped]
+            for iloc in grouped:
+                yield cent.iloc[iloc].unary_union.centroid
+
+        data = GeoDataFrame({
+            'geometry': gpd.GeoSeries(geometry(), crs=data['geometry'].crs),
+            'centroid': gpd.GeoSeries(centroid(), crs=data['centroid'].crs)
+        })
+
+        # Second, aggrgeate the geometries where there is an overlap.
         data['area'] = data.area
         data = data.sort_values(by='area', ascending=False)
         footprints = pd.Series(range(len(data)), index=data.index)
@@ -36,7 +75,6 @@ class DescriptorFootprint:
         for i, centroid in enumerate(data['centroid']):
             annoy.add_item(i, (centroid.x, centroid.y))  # lower i, higher area
         annoy.build(10)
-
 
         for i, (g, a) in enumerate(data[['geometry', 'area']].values):
             for n in annoy.get_nns_by_item(i, 30):
@@ -72,20 +110,20 @@ class DescriptorFootprint:
                 else:
                     yield c.iloc[iloc].unary_union.centroid
 
-        # footprints = gpd.GeoDataFrame({'geometry': geometry(), 'centroid': centroid()})
-        footprints = gpd.GeoDataFrame({
+        # footprints = GeoDataFrame({'geometry': geometry(), 'centroid': centroid()})
+        footprints = GeoDataFrame({
             'geometry': gpd.GeoSeries(geometry(), crs=data['geometry'].crs),
             'centroid': gpd.GeoSeries(centroid(), crs=data['centroid'].crs)
         })
-
-        from validateosm.source.source import Source
-        source: Source = next(iter(self._instance.sources.values()))
-        identity = source.identify(footprints)
-        footprints = footprints.set_index(identity, drop=True)
+        identity = self.identity(footprints)
+        footprints = footprints.set_index(identity)
 
         footprints['geometry'] = footprints['geometry'].to_crs(3857)
         footprints['centroid'] = footprints['centroid'].to_crs(3857)
         return footprints
+
+    def identity(self, gdf: GeoDataFrame) -> pd.Series:
+        return pd.Series(range(len(gdf)), index=gdf.index, name='i', dtype='Int64')
 
     @functools.cached_property
     def _annoy(self) -> AnnoyIndex:
@@ -95,10 +133,10 @@ class DescriptorFootprint:
         annoy.build(10)
         return annoy
 
-    def __call__(self, data: Union[str, gpd.GeoDataFrame]) -> gpd.GeoDataFrame:
+    def __call__(self, data: Union[str, GeoDataFrame]) -> GeoDataFrame:
         if isinstance(data, str):
-            data: gpd.GeoDataFrame = self._instance.data.xs(data)
-        elif not isinstance(data, gpd.GeoDataFrame):
+            data: GeoDataFrame = self.compare.data.xs(data)
+        elif not isinstance(data, GeoDataFrame):
             raise TypeError(type(data))
         data['geometry'] = data['geometry'].to_crs(3857)
         data['centroid'] = data['centroid'].to_crs(3857)
@@ -117,8 +155,12 @@ class DescriptorFootprint:
                     yield match.name
                     break
 
+        # print(data.index.names)
         index = pd.Series(footprint(), index=data.index, name=footprints.index.name)
+        # print(index.index.names)
+        names = [footprints.index.name, *data.index.names]
         data = data.set_index(index, drop=False, append=True)
-        data = data.reorder_levels([index.name, 'name'])
+        # print(names)
+        data = data.reorder_levels(names)
         data = data.sort_index()
         return data

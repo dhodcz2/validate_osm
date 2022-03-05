@@ -10,7 +10,7 @@ from geopandas import GeoDataFrame
 
 from validate_building_height.base import (
     Height,
-    NeedlesHeight
+    HeightOSM
 )
 from validateosm.source import (
     BBox
@@ -32,7 +32,7 @@ class Chicago(Height, abc.ABC):
     bbox = BBox([41.83099018739837, -87.66603456346172, 41.90990199281114, -87.5919345279835])
 
 
-class ChicagoBuildingHeightNeedles(NeedlesHeight, Chicago):
+class ChicagoBuildingHeightOSM(HeightOSM, Chicago):
     @enumerative(int)
     def bldg_id(self) -> Iterable[int]:
         yield from (

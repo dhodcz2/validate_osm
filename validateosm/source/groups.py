@@ -1,11 +1,14 @@
 import dataclasses
 import functools
 import inspect
+import itertools
+import weakref
 from collections import UserDict
 from typing import Callable, Collection, Generator
 from weakref import WeakKeyDictionary
 
 import networkx
+import pandas as pd
 from geopandas import GeoDataFrame
 from networkx.algorithms.components.connected import connected_components
 
@@ -14,23 +17,73 @@ from validateosm.source.pipe import DescriptorPipe
 
 @dataclasses.dataclass
 class Groups:
-    _data: GeoDataFrame
-    _grouped: Collection[Collection[int]]
-    _ungrouped: Collection[int]
+    data: GeoDataFrame
+    grouped: Collection[Collection[int]]
+    _grouped: Collection[Collection[int]] = dataclasses.field(init=False, repr=False)
+    ungrouped: Collection[int]
+    _ungrouped: Collection[int] = dataclasses.field(init=False, repr=False)
+
+    @property
+    def grouped(self) -> list[GeoDataFrame]:
+        return [
+            self.data.iloc[group]
+            for group in self._grouped
+        ]
+
+    @grouped.setter
+    def grouped(self, value):
+        self._grouped = [
+            list(v) for v in value
+        ]
+
+    @property
+    def ungrouped(self) -> GeoDataFrame:
+        return self.data.iloc[self._ungrouped]
+
+    @ungrouped.setter
+    def ungrouped(self, value):
+        self._ungrouped = list(value)
+
+    # @functools.cached_property
+    # def index_grouped(self) -> list[tuple]:
+    #     index = self.data.index
+    #     members = (
+    #         group[0]
+    #         for group in self._grouped
+    #     )
+    #     return [
+    #         index[member][:-2]
+    #         for member in members
+    #     ]
+    #
+    # @functools.cached_property
+    # def index_ungrouped(self) -> list[tuple]:
+    #     return [
+    #         tuple[:2]
+    #         for tuple in self.data.iloc[self._ungrouped].index
+    #
+    #     ]
 
     @functools.cached_property
-    def grouped(self) -> Generator[GeoDataFrame, None, None]:
-        yield from (
-            self._data.iloc[group]
+    def index(self):
+        index_ungrouped = (
+            tuple[:2]
+            for tuple in self.data.iloc[self._ungrouped].index
+        )
+        index = self.data.index
+        members = (
+            group[0]
             for group in self._grouped
         )
+        index_grouped = (
+            index[member][:-2]
+            for member in members
+        )
+        return pd.MultiIndex.from_tuples(
+            itertools.chain(index_ungrouped, index_grouped),
+            names=self.data.index.names[:2]
+        )
 
-    @functools.cached_property
-    def ungrouped(self) -> GeoDataFrame:
-        return self._data.iloc[self._ungrouped]
-
-    def __len__(self) -> int:
-        return len(self._ungrouped) + len(self._grouped)
 
 
 @dataclasses.dataclass

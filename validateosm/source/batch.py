@@ -17,7 +17,7 @@ class CacheBatch(UserDict):
     def __missing__(self, key):
         from validateosm.source import Source
         key: Source
-        batch: GeoDataFrame = key.aggregate.copy()
+        batch: GeoDataFrame = key.aggregate_factory.copy()
         identity = key.identity()
         if identity is not None:
             batch.update(identity)

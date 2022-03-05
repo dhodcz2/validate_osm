@@ -1,31 +1,25 @@
 import functools
 import inspect
 from pathlib import Path
-from typing import Union, Iterable, Type, Generator
+from typing import Union, Iterable, Type, Iterator
 
-import geopandas as gpd
-import pandas
-import pandas as pd
-import shapely.geometry
-from annoy import AnnoyIndex
 from geopandas import GeoDataFrame
 
-from validateosm.compare.footprint import DescriptorFootprint
+from validateosm.compare.aggregate import DescriptorAggregate
+from validateosm.compare.data import DescriptorData
+from validateosm.source.footprint import Footprint
 from validateosm.source.source import (
     Source,
 )
-from validateosm.compare.aggregate import DescriptorAggregate
-from validateosm.compare.data import DescriptorData
 
 
 class Compare:
     data = DescriptorData()
     aggregate = DescriptorAggregate()
-    footprint = DescriptorFootprint()
     batch: Union[GeoDataFrame]
     sources: dict[str, Source]
 
-    def __init__(self, *sources: Type[Source] | Iterable[Type[Source]], redo=False):
+    def __init__(self, *sources: Type[Source] | Iterable[Type[Source]], ignore_file=False):
         if isinstance(sources, Source):
             sources = (sources,)
         elif isinstance(sources, Iterable):
@@ -37,12 +31,23 @@ class Compare:
             source.name: source()
             for source in sources
         }
-        self._redo = redo
-        # TODO: Perhaps manipulate the bboxes for more efficent loading
+        self.ignore_file = ignore_file
+
+        # Resolve footprint from sources
+        footprints: Iterator[tuple[Type[Footprint], Source]] = zip(
+            (source.footprint for source in sources),
+            sources
+        )
+        footprint, source = next(footprints)
+        for other_footprint, other_source in footprints:
+            if other_footprint is not footprint:
+                raise ValueError(f"{source.__class__.__name__}.footprint!={other_source.__class__.name}.footprint")
+        self.footprint = footprint(self)
+
 
     @functools.cached_property
     def names(self) -> list[str]:
-        names =  list(self.sources.keys())
+        names = list(self.sources.keys())
         names.sort()
         return names
 
@@ -51,23 +56,6 @@ class Compare:
 
     def __getitem__(self, item: str) -> Source:
         return self.sources[item]
-
-    # def _identify(self, gdf: GeoDataFrame) -> GeoDataFrame:
-    #     source: Source = next(iter(self.sources.values()))
-    #     identity = source.identify(gdf)
-    #     gdf = gdf.set_index(identity, drop=False, append=True)
-    #     gdf = gdf.reorder_levels(['ubid', 'name']).sort_index()
-    #     return gdf
-
-    @property
-    def redo(self) -> bool:
-        return self._redo
-
-    @redo.setter
-    def redo(self, value):
-        if not isinstance(value, bool):
-            raise TypeError(type(value))
-        self._redo = value
 
     @functools.cached_property
     def directory(self) -> Path:

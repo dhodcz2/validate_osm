@@ -1,23 +1,45 @@
-import numpy.typing
-from typing import Optional, Iterator, Iterable
-
 import abc
 import datetime
+import warnings
+from typing import Optional, Iterator, Iterable
 
-import numpy
-from geopandas import GeoDataFrame
-from pandas import Series
-
-from validateosm.source import data, group, aggregate, Source, SourceOSM, BBox
+import buildingid.code
 import dateutil.parser
+import geopandas as gpd
+import numpy
+import numpy.typing
+import pandas as pd
+from geopandas import GeoDataFrame
+
+from validateosm.source import data, Source, SourceOSM
+from validateosm.source.footprint import Footprint
 
 
-class SourceBuilding(Source, abc.ABC):
-    def identity(self) -> Optional[Series]:
-        # TODO: UBID
-        return None
-        return Series(None, name='ubid', index=self.aggregate.index)
+class BuildingFootprint(Footprint):
+    def identity(self, gdf: GeoDataFrame) -> pd.Series:
+        def ubid():
+            warnings.filterwarnings('ignore', 'geographic CRS')
+            centroid = gdf['centroid'].to_crs(4326)
+            geometry: gpd.GeoSeries = gdf['geometry'].to_crs(4326)
+            for x, y, (minx, miny, maxx, maxy) in zip(centroid.x, centroid.y, geometry.bounds.values):
+                #     # TODO: codeLength=11 appropriate? Programatically determine code length?
+                yield buildingid.code.encode(
+                    latitudeLo=miny,
+                    latitudeHi=maxy,
+                    longitudeLo=minx,
+                    longitudeHi=maxx,
+                    latitudeCenter=y,
+                    longitudeCenter=x,
+                    codeLength=11
+                )
 
+        return pd.Series(ubid(), index=gdf.index, name='ubid', dtype='string')
+
+
+class BuildingSource(Source, abc.ABC):
+    footprint = BuildingFootprint
+
+    @staticmethod
     def exclude(self) -> Optional[numpy.typing.NDArray[bool]]:
         # TODO: Exclude things that are too tiny or are clutter
 
@@ -83,7 +105,7 @@ class SourceBuilding(Source, abc.ABC):
         """The date at which the building began construction"""
 
 
-class SourceOSMBuilding(SourceOSM, SourceBuilding, abc.ABC):
+class SourceOSMBuilding(SourceOSM, BuildingSource, abc.ABC):
     def address(self) -> Iterable[object]:
         housenums = (
             element.tag('addr:housenumber')

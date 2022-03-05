@@ -1,38 +1,28 @@
-import geopandas as gpd
-import shapely.ops
-
-import inspect
-
-import numpy.typing
-from pathlib import Path
-
 import abc
-import copy
 import dataclasses
-import datetime
-import functools
 import itertools
+import warnings
 from typing import Any, Container, Type
-from typing import Optional, Iterable, Iterator, Collection, Union
-from typing import ValuesView
-import numpy
-import numpy as np
-import pandas as pd
-import pyproj
-import shapely.geometry.base
-from annoy import AnnoyIndex
-from geopandas import GeoSeries, GeoDataFrame
-from pandas import Series, DataFrame
+from typing import Optional, Collection, Union
 
-from validateosm.source.static import StaticRegional, StaticBase, StaticNaive
-from validateosm.source.aggregate import DescriptorAggregate, DecoratorAggregate
+import geopandas as gpd
+import numpy as np
+import numpy.typing
+import pandas as pd
+import shapely.geometry.base
+import shapely.ops
+from geopandas import GeoSeries, GeoDataFrame
+
+from validateosm.source.aggregate import AggregateFactory
 from validateosm.source.data import DecoratorData, DescriptorData
+from validateosm.source.footprint import Footprint
 from validateosm.source.groups import (
     DescriptorGroup,
-    DecoratorGroup,
     Groups
 )
-from validateosm.source.identifier import DescriptorIdentify
+from validateosm.source.static import StaticBase
+
+warnings.filterwarnings('ignore', message='.*initial implementation of Parquet.*')
 
 
 @dataclasses.dataclass
@@ -41,48 +31,12 @@ class BBoxStruct:
     cartesian: shapely.geometry.Polygon
     crs: Any
 
-    # _crs: Any = dataclasses.field(init=False, repr=False)
-
-    # def __post_init__(self):
-    #     self._flipped = False
-
     def __repr__(self):
         return str([
             round(bound, 2)
             for bound in self.ellipsoidal.bounds
         ])
 
-    # @property
-    # def flipped(self):
-    #     return self._flipped
-    #
-    # @flipped.setter
-    # def flipped(self, val: bool):
-    #     match val:
-    #         case bool():
-    #             if self.flipped != val:
-    #                 self._flipped = val
-    #                 self.ellipsoidal = shapely.geometry.Polygon((y, x) for x, y in self.ellipsoidal)
-    #                 self.cartesian = shapely.geometry.Polygon((y, x) for x, y in self.cartesian)
-    #         case _:
-    #             raise TypeError(val)
-
-    # @property
-    # def crs(self):
-    #     return self._crs
-    #
-    # @crs.setter
-    # def crs(self, val: Any):
-    #     if hasattr(self, '_crs'):
-    #         geom = gpd.GeoSeries((self.ellipsoidal, self.cartesian), crs=self.crs)
-    #         self._crs = val
-    #         self.ellipsoidal, self.cartesian = geom.to_crs(val)
-    #     else:
-    #         self._crs = val
-    #
-
-
-# TODO: BBox understands its recipient; if
 
 class BBox:
     _cache_static: dict[type, BBoxStruct] = {}
@@ -142,13 +96,21 @@ class Source(abc.ABC):
 
     resource: Union[gpd.GeoDataFrame, StaticBase]
     data: Union[DescriptorData, GeoDataFrame] = DescriptorData()
-    groups: Union[Groups, DescriptorGroup] = DescriptorGroup()
-    aggregate: Union[DescriptorAggregate, GeoDataFrame] = DescriptorAggregate()
-    footprint: Optional['Source']
+    footprint: Type[Footprint] = Footprint
+    # groups: Union[Groups, DescriptorGroup] = DescriptorGroup()
+    aggregate_factory: AggregateFactory = AggregateFactory()
     name: str
     link: str
     bbox: BBox
     resource: Union[StaticBase, pd.DataFrame, gpd.GeoDataFrame]
+
+    def group(self) -> GeoDataFrame:
+        """
+        Assign to self.data an index
+        :return: None
+        """
+        data = self.data
+        return data.set_index(pd.Index(data=itertools.repeat(np.nan, len(data)), name='group'), append=True)
 
     def resource(self) -> Union[StaticBase]:
         """An instance or Iterator of instances that encapsulate the raw data that is entering this pipeline."""
@@ -157,15 +119,6 @@ class Source(abc.ABC):
 
     def exclude(self) -> Optional[numpy.typing.NDArray[bool]]:
         """ Iterates across Source.aggregate and yields True if entry is to be excluded from Source.batch """
-
-    def footprint(cls) -> Optional['Source']:
-        """
-        If defined, Source will reference footprint's geometry to determine its aggregate, rather than self-referential
-        containment.
-        """
-        return None
-
-    footprint = classmethod(property(footprint))
 
     def name(cls) -> str:
         """A short, abbreviated name that may be used for quickly selecting a specific source."""
@@ -187,8 +140,6 @@ class Source(abc.ABC):
     def validating(cls) -> set[str]:
         """The specific columns that will be validated"""
         return cls.data.validating
-
-    identify = DescriptorIdentify()
 
     @DecoratorData(dtype='geometry', crs=4326)
     @abc.abstractmethod
@@ -216,63 +167,3 @@ class Source(abc.ABC):
             shapely.geometry.Point(centroid.y, centroid.x)
             for centroid in self.data.loc[loc, 'centroid']
         ), index=self.data.loc[loc].index)
-
-    @DecoratorAggregate('geometry')
-    def _(self) -> GeoSeries:
-        single = self.groups.ungrouped['geometry']
-        multi = (
-            gdf['geometry'].unary_union
-            for gdf in self.groups.grouped
-        )
-        return GeoSeries(
-            data=itertools.chain(single, multi),
-            crs=self.groups.ungrouped['geometry'].crs,
-        ).to_crs(4326)
-
-    @DecoratorAggregate('centroid')
-    def _(self) -> GeoSeries:
-        single = self.groups.ungrouped['centroid']
-        multi = (
-            gdf['centroid'].unary_union
-            for gdf in self.groups.grouped
-        )
-        return GeoSeries(
-            data=itertools.chain(single, multi),
-            crs=self.groups.ungrouped['centroid'].crs,
-        ).to_crs(3857)
-
-    @DecoratorAggregate('ref')
-    def _(self) -> GeoSeries:
-        single = self.groups.ungrouped['ref']
-        multi = (
-            gdf['ref'].unary_union
-            for gdf in self.groups.grouped
-        )
-        multi = (
-            None if union is None
-            else union.centroid
-            for union in multi
-        )
-        return GeoSeries(
-            data=itertools.chain(single, multi),
-            crs=self.groups.ungrouped['ref'].crs,
-        )
-
-    @DecoratorAggregate('data')
-    def _(self) -> Series:
-        single = (
-            [i]
-            for i in self.groups.ungrouped.index
-        )
-        multi = (
-            list(gdf.index)
-            for gdf in self.groups.grouped
-        )
-        return Series(data=itertools.chain(single, multi), )
-
-    # directory: Path
-    #
-    # def directory(cls) -> Path:
-    #     return Path(inspect.getfile(cls)).parent / 'resources' / cls.__name__
-    #
-    # directory = classmethod(property(directory))

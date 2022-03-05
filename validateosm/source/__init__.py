@@ -16,10 +16,6 @@ from validateosm.source.source_osm import (
 from validateosm.source.data import (
     DecoratorData as data
 )
-from validateosm.source.aggregate import (
-    DecoratorAggregate as aggregate
-)
 from validateosm.source.groups import (
     DecoratorGroup as group
 )
-

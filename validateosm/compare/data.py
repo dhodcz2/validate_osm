@@ -1,14 +1,15 @@
 import dataclasses
 import os
 import warnings
-from collections import UserDict
 from pathlib import Path
-from typing import Generator, Union, Optional, Type, Callable, Iterable, Any
+from typing import Generator, Union, Type, Any
 
 import geopandas as gpd
+import numpy as np
 from geopandas import GeoDataFrame
+
 from validateosm.util import concat
-from validateosm.source.data import StructData as StructSingleData
+
 
 @dataclasses.dataclass
 class StructData:
@@ -39,10 +40,10 @@ class DescriptorData:
         self._owner = owner
         if self._instance is None:
             return self
-        elif self._data is not None and not instance.redo:
+        elif self._data is not None:
             return self._data
-        elif self.path.exists() and not instance.redo:
-            data = self._data = gpd.read_feather(self.path)
+        elif self.path.exists() and not instance.ignore_file:
+            self._data = data = gpd.read_feather(self.path)
             warnings.warn(f"{repr(self._instance)}.data has been loaded from cache. To force a redo, assign "
                           f"{repr(self._instance)}=True")
             return data
@@ -53,18 +54,28 @@ class DescriptorData:
 
             # We must concatenate DataFrames instead of going purely by Series because some columns
             #   may return a single-value, which must be repeated to the same length of other columns
+            # To preserve SourceOSM.relation and SourceOSM.way indices, we must first
             def datas() -> Generator[gpd.GeoDataFrame, None, None]:
                 for name, source in self._instance.sources.items():
                     data: GeoDataFrame = source.data
-                    yield data.assign(name=name).set_index('name')
+                    data['name'] = name
+                    if 'relation' not in data:
+                        data['relation'] = np.nan
+                    if 'way' not in data:
+                        data['way'] = np.nan
+                    yield data.set_index(['name', 'relation', 'way'])
                     del source.data
 
-            # data = self._data = concat(datas())
-            # data = self._instance.footprint(data)
+            # self._data must be set for footprint to not cause inifinite recursion
+            try:
+                data = self._data = concat(datas())
+                data = self._data = self._instance.footprint(data)
+            except Exception as e:
+                # If something happens, we don't want a half-formed _data
+                del self._data
+                raise e
 
-            data = concat(datas())
-            data = self._instance.footprint(data)
-            self._data = data
+            data = self._data = data.sort_index(axis=0)
 
             if not self.path.parent.exists():
                 os.makedirs(self.path.parent)
@@ -76,6 +87,9 @@ class DescriptorData:
 
     def __repr__(self):
         return f'{self._instance}.data'
+
+    def __bool__(self):
+        return self._data is not None
 
     # TODO: Compare.data should not have the identifier directly applied to the data. Instead, the identifier
     #   is applied to the footprint that groups the data; data:footprint is many-to-one; aggregate:footprint is

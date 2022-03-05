@@ -20,8 +20,6 @@ class DescriptorPipe:
         from validateosm.source import Source
         self._instance: Source = instance
         self._owner: Type[Source] = owner
-        # self._instance = instance
-        # self._owner = owner
         if instance is None:
             return self
         return self._cache[instance]
@@ -31,6 +29,9 @@ class DescriptorPipe:
 
     def __bool__(self):
         return self._instance in self._cache
+
+    def __set__(self, instance, value):
+        self._cache[instance] = value
 
 
 class DescriptorPipeSerialize(DescriptorPipe, abc.ABC):
@@ -54,10 +55,10 @@ class DescriptorPipeSerialize(DescriptorPipe, abc.ABC):
     @property
     def path(self) -> Path:
         return (
-            Path(inspect.getfile(self._owner)).parent /
-            'resources' /
-            self._owner.__name__ /
-            f'{self.__class__.__name__}.feather'
+                Path(inspect.getfile(self._owner)).parent /
+                'resources' /
+                self._owner.__name__ /
+                f'{self.__class__.__name__}.feather'
         )
 
     def delete_file(self) -> None:
