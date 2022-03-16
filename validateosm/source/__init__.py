@@ -10,7 +10,7 @@ from validateosm.source.source import (
 from validateosm.source.source_osm import (
     SourceOSM,
 )
-from validateosm.source.source_osm import (
+from validateosm.source.overpass import (
     DecoratorEnumerative as enumerative
 )
 from validateosm.source.data import (

@@ -20,6 +20,7 @@ from validateosm.source.static import StaticRegional, File
 
 class MSBuildingFootprints(StaticRegional):
     crs = 'epsg:4326'
+    columns = 'geometry'
 
     class RegionSouthAmerica(StaticRegional.Region):
         menu = {'Argentina', 'Bolivia', 'Brazil', 'Chile', 'Colombia', 'Ecuador', 'Guyana', 'Paraguay',
@@ -27,6 +28,8 @@ class MSBuildingFootprints(StaticRegional):
 
         @classmethod
         def __getitem__(self, country: str, *args) -> Generator[File, None, None]:
+            if not isinstance(country, str):
+                raise TypeError(country)
             url = f'https://minedbuildings.blob.core.windows.net/southamerica/{country}.geojsonl.zip'
             yield File(url=url, path=MSBuildingFootprints.directory / url.rpartition('/')[2])
 
@@ -47,26 +50,32 @@ class MSBuildingFootprints(StaticRegional):
         @functools.cached_property
         def _states(self) -> gpd.GeoDataFrame:
             gdf = gpd.read_file('https://www2.census.gov/geo/tiger/GENZ2018/shp/cb_2018_us_state_20m.zip')
-            gdf = gdf.loc[gdf['NAME'].isin(self.menu)]
+            gdf = gdf.loc[gdf['NAME'].isin(self.state_names)]
             return gdf
 
         def __getitem__(self, item: Iterable) -> Generator[File, None, None]:
-            unpack = iter(item)
-            country = next(unpack)
-            states: Union[str, Iterable[str]] = next(unpack, None)
 
-            if isinstance(country, Polygon):
-                states = self._states.loc[self._states.geometry.intersects(country), 'NAME']
-            match states:
-                case str():
-                    states = (states,)
-                case slice():
-                    states = self.state_names
-                case None:
-                    raise TypeError(
-                        f"{self.__class__.__name__} received {item};\nAn iterable must be passed"
-                        f" that specifies the states. To receive all states, pass {slice}"
-                    )
+            # unpack = iter(item)
+            # country = next(unpack)
+            # states: Union[str, Iterable[str]] = next(unpack, None)
+            #
+            # if isinstance(country, Polygon):
+            #     states = self._states.loc[self._states.geometry.intersects(country), 'NAME']
+            # match states:
+            #     case str():
+            #         states = (states,)
+            #     case slice():
+            #         states = self.state_names
+            #     case None:
+            #         raise TypeError(
+            #             f"{self.__class__.__name__} received {item};\nAn iterable must be passed"
+            #             f" that specifies the states. To receive all states, pass {slice}"
+            #         )
+            if not isinstance(item, Polygon):
+                raise TypeError(item)
+
+            gdf = self._states
+            states = gdf.loc[gdf.geometry.intersects(item), 'NAME']
 
             states: Iterator[str] = (
                 str(state).title().replace(' ', '')
@@ -96,6 +105,8 @@ class MSBuildingFootprints(StaticRegional):
         menu = {'Uganda', 'Tanzania'}
 
         def __getitem__(self, country: str, *args) -> File:
+            if not isinstance(country, str):
+                raise TypeError(country)
             url = f'https://usbuildingdata.blob.core.windows.net/tanzania-uganda-buildings/{country}_2019-09-16.zip'
             yield File(url=url, path=MSBuildingFootprints.directory / url.rpartition('/')[2])
 
@@ -104,15 +115,15 @@ class MSBuildingFootprints(StaticRegional):
     @functools.cached_property
     def _countries(self) -> gpd.GeoDataFrame:
         countries = gpd.read_file(gpd.datasets.get_path('naturalearth_lowres'))
-        countries = countries[countries.isin(self.menu)]
+        countries = countries[countries['name'].isin(self.menu)]
         return countries
 
     def _files_from_polygon(self, item: Polygon) -> Generator[File, None, None]:
         # TODO: Problem is that we cannot simply query RegionUS; we must specify the states
         #   Thus the solution may be to send the country to the region, and if TypeError is raised, then
         #   we send a Polygon, saying, "Don't want it? Fine! You decide!"
+        # TODO: Somehow, self._countries is losing its geometry.
         countries: pd.Series = self._countries.loc[self._countries.geometry.intersects(item), 'name']
-        countries = countries.isin(self.menu)
         for country in countries:
             try:
                 yield from self._menu[country][country]

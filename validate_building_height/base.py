@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 
 from validate_building_height.building import (
-    BuildingSource, SourceOSMBuilding
+    BuildingSource, BuildingSourceOSM
 )
 from validateosm.source import (
     data,
@@ -117,7 +117,8 @@ class Height(BuildingSource, abc.ABC):
         """The physical height of the building in meters"""
 
 
-class HeightOSM(SourceOSMBuilding, Height, abc.ABC):
+# class HeightOSM(BuildingSourceOSM, Height, abc.ABC):
+class HeightOSM(BuildingSourceOSM, Height, abc.ABC):
     @enumerative(float)
     def floors(self):
         yield from (

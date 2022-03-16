@@ -17,7 +17,7 @@ from validateosm.source.pipe import DescriptorPipe
 
 @dataclasses.dataclass
 class Groups:
-    data: GeoDataFrame
+    data: GeoDataFrame = dataclasses.field(repr=False)
     grouped: Collection[Collection[int]]
     _grouped: Collection[Collection[int]] = dataclasses.field(init=False, repr=False)
     ungrouped: Collection[int]

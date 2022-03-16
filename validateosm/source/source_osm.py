@@ -255,12 +255,13 @@ class SourceOSM(Source, abc.ABC):
     link = 'https://www.openstreetmap.org'
 
     def group(self) -> GeoDataFrame:
-        self.data: GeoDataFrame
+        data: GeoDataFrame = self.data
+        data['id'] = self.id
+        self.data = data = data.set_index('id')
         # Set ID as an index
-        data = self.data.set_index(self.id, name='id', drop=True)
 
         # append enumerative entries
-        data = data.append(self.resource.enumerative.appendix)
+        data = data.append(self.resource.enumerative)
 
         # Group together according to relations
         G = networkx.Graph()
@@ -269,15 +270,15 @@ class SourceOSM(Source, abc.ABC):
             G.add_edges_from(zip(group[:-1], group[1:]))
         index = set(data.index)
         groups = connected_components(G)
-        incomplete: Iterable[Hashable] = (
+        incomplete: Iterable[Hashable] = [
             value
             for group in groups
             if not all(id in index for id in group)
             for value in groups
-        )
+        ]
 
         # Drop those who are part of incomplete groups
-        data = data.drop(incomplete, level='id')
+        data = data.drop(incomplete)
         complete: list[set] = [
             group for group in groups
             if all(id in index for id in group)
@@ -305,14 +306,13 @@ class SourceOSM(Source, abc.ABC):
             for element in self.resource
         ]
 
-
-
     def timestamp(self) -> Iterable[datetime]:
         generator: Iterator[datetime] = (
-            datetime.strptime(element.timestamp(), '%Y-%m-%dT%H:%M:%SZ')
+            # datetime.strptime(element.timestamp(), '%Y-%m-%dT%H:%M:%SZ')
+            element.timestamp()
             for element in self.resource
         )
-        return Series(generator, dtype='datetimens[64]')
+        return Series(generator, dtype='datetime64[ns]')
 
     def geometry(self) -> GeoSeries:
         mapping = {

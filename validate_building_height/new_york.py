@@ -12,9 +12,10 @@ from geopandas import GeoDataFrame
 
 from validateosm.config import ROOT
 # from validate_building_height.base import Height, NeedlesHeight
-from validating_building_height.base import (
-    Height, NeedlesHeight
-)
+# from validating_building_height.base import (
+#     Height, NeedlesHeight
+# )
+from validate_building_height.base import Height, HeightOSM
 from validateosm.source.source import (
     BBoxStruct, BBox,
 )
@@ -25,6 +26,7 @@ from validateosm.source import (
     aggregate,
     enumerative,
 )
+from validateosm.source.static import StaticBase
 
 
 class NewYork(Source, abc.ABC):
@@ -35,7 +37,7 @@ class NewYork(Source, abc.ABC):
         """The New York Building Identification Number"""
 
 
-class NewYorkBuildingHeightNeedles(NeedlesHeight, NewYork):
+class NewYorkBuildingHeightNeedles(HeightOSM, NewYork):
     @enumerative(int)
     def bin(self):
         return (
@@ -45,7 +47,7 @@ class NewYorkBuildingHeightNeedles(NeedlesHeight, NewYork):
 
 
 class NewYork3DModel(NewYork, Height):
-    resource = Static(
+    resource = StaticBase(
         uri="https://www1.nyc.gov/site/doitt/initiatives/3d-building.page",
         crs=2263,
         flipped=True,
@@ -110,7 +112,7 @@ class NewYorkOpenCityModel(NewYork, Height):
 
     # TODO: Temporary placeholder to just leverage one source that is particularly
     # TODO: This Static file is zipped with one file. Be certain this works without specification of unzipped contents
-    resource = Static(
+    resource = StaticBase(
         url='https://s3.dualstack.us-east-1.amazonaws.com/opencitymodel/2019-jun/gml/NewYork/36061/'
             'NewYork-36061-000.zip',
         crs='epsg:4979'
@@ -146,7 +148,7 @@ class NewYorkOpenCityModel(NewYork, Height):
 class NewYorkLOD(NewYork, Height):
     link = 'https://www.asg.ed.tum.de/gis/projekte/new-york-city-3d/#c753'
     name = 'lod'
-    resource = Static(
+    resource = StaticBase(
         url='http://www.3dcitydb.net/3dcitydb/fileadmin/public/datasets/NYC/NYC_buildings_CityGML_LoD2/'
             'NYC_Buildings_LoD2_CityGML.zip',
         unzipped='NYC_Buildings_LoD2_CityGML.gml',

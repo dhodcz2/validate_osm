@@ -8,12 +8,14 @@ from validate_building_height.base import Height, HeightOSM
 
 import abc
 
+from validateosm.source import BBox
 
-class EastUIC(Height, abc.ABC):
+
+class HeightEastUIC(Height, abc.ABC):
     bbox = BBox([41.86230680163941, -87.65090039861178, 41.87438700655404, -87.64710239060574])
 
 
-class EastUicMSBF(EastUIC):
+class EastUicMSBF(HeightEastUIC):
     name = 'msbf'
     link = ''
     resource = StaticNaive(
@@ -43,38 +45,45 @@ class EastUicMSBF(EastUIC):
         ...
 
 
-class EastUicStaticOSM(EastUIC):
-    name = 'osm_static'
-    link = ''
-    resource = StaticNaive(
-        files=File(path='/home/arstneio/Downloads/chicago-osm.feather'),
-        crs=4326,
-        columns=['geometry']
-    )
+class DynamicEastUicMSBF(EastUicMSBF):
+    from validate_building_height.regional import MSBuildingFootprints
+    resource = MSBuildingFootprints()
 
-    def geometry(self):
-        return self.resource['geometry']
 
-    def timestamp(self):
-        ...
-
-    def address(self):
-        ...
-
-    def height_m(self):
-        ...
-
-    def start_date(self):
-        ...
-
-    def floors(self):
-        ...
+#
+# class EastUicStaticOSM(HeightOSM, HeightEastUIC):
+#     name = 'osm_static'
+#     link = ''
+#     resource = StaticNaive(
+#         files=File(path='/home/arstneio/Downloads/chicago-osm.feather'),
+#         crs=4326,
+#         columns=['geometry']
+#     )
+#
+#     def geometry(self):
+#         return self.resource['geometry']
+#
+#     def timestamp(self):
+#         ...
+#
+#     def address(self):
+#         ...
+#
+#     def height_m(self):
+#         ...
+#
+#     def start_date(self):
+#         ...
+#
+#     def floors(self):
+#         ...
 
 
 from validateosm.source.source_osm import SourceOSM
 
 
-class EastUicDynamicOSM(EastUIC, HeightOSM):
+class EastUicOSM(HeightOSM, HeightEastUIC):
+    # TODO: Problem is that cannot be instantiated, because HeightOSM.floors is not abstract but EastUIC.floors is
     name = 'osm'
     link = ''
 
@@ -82,9 +91,7 @@ class EastUicDynamicOSM(EastUIC, HeightOSM):
 if __name__ == '__main__':
     from validateosm.compare.compare import Compare
 
-    # compare = Compare(EastUicStaticOSM, EastUicMSBF, ignore_file=True)
-    compare = Compare(EastUicDynamicOSM, EastUicStaticOSM)
-    footprints = compare.footprint.footprints
+    compare = Compare(DynamicEastUicMSBF, EastUicOSM, ignore_file=True)
     data = compare.data
+    footprints = compare.footprint.footprints
     aggregate = compare.aggregate
-    print()

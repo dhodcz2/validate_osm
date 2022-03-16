@@ -49,7 +49,7 @@ class DescriptorWays:
     def __iter__(self) -> Iterator[OverpassResult]:
         from validateosm.source.source_osm import SourceOSM
         self.source: SourceOSM
-        fragments = FragmentBBox(self.source.bbox.data.ellipsoidal)
+        fragments = FragmentBBox(self.source.bbox.data.ellipsoidal.bounds)
         while fragments:
             peak = fragments.peak()
             query = self.source.query(peak, type=self.type, appendix='out count;')
@@ -100,7 +100,7 @@ class DecoratorEnumerative:
         from validateosm.source.source_osm import SourceOSM
         @functools.wraps(func)
         def wrapper(source: SourceOSM):
-            cache = self.cache[source]
+            cache = self.cache.setdefault(source, {})
             ids = source.id
             cast = self.cast
             name = func.__name__
@@ -138,7 +138,7 @@ class DescriptorEnumerative:
         return self.appendix()
 
     def appendix(self) -> gpd.GeoDataFrame:
-        cache = DecoratorEnumerative.cache[self.source]
+        cache = DecoratorEnumerative.cache.setdefault(self.source, {})
         lens = {
             id: max(len(list) for list in column.values())
             for id, column in cache.items()

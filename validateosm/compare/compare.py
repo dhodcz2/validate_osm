@@ -7,9 +7,9 @@ from geopandas import GeoDataFrame
 
 from validateosm.compare.aggregate import DescriptorAggregate
 from validateosm.compare.data import DescriptorData
-from validateosm.source.footprint import Footprint
+from validateosm.source.footprint import CallableFootprint
 from validateosm.source.source import (
-    Source,
+    Source, BBox
 )
 
 
@@ -19,7 +19,7 @@ class Compare:
     batch: Union[GeoDataFrame]
     sources: dict[str, Source]
 
-    def __init__(self, *sources: Type[Source] | Iterable[Type[Source]], ignore_file=False):
+    def __init__(self, *sources: Type[Source] | Iterable[Type[Source]], ignore_file=False, bbox: BBox = None):
         if isinstance(sources, Source):
             sources = (sources,)
         elif isinstance(sources, Iterable):
@@ -33,17 +33,23 @@ class Compare:
         }
         self.ignore_file = ignore_file
 
-        # Resolve footprint from sources
-        footprints: Iterator[tuple[Type[Footprint], Source]] = zip(
-            (source.footprint for source in sources),
-            sources
-        )
-        footprint, source = next(footprints)
-        for other_footprint, other_source in footprints:
-            if other_footprint is not footprint:
-                raise ValueError(f"{source.__class__.__name__}.footprint!={other_source.__class__.name}.footprint")
-        self.footprint = footprint(self)
+        if bbox is not None:
+            for source in self.sources.values():
+                source.bbox = bbox
+                source.ignore_file = ignore_file
+        self.bbox = bbox
 
+        self._footprint = None
+
+    @property
+    def footprint(self) -> CallableFootprint:
+        if self._footprint is None:
+            raise RuntimeError(f"Compare.footprint is dependent upon Compare.data; first, instantiate Compare.data")
+        return self._footprint
+
+    @footprint.setter
+    def footprint(self, value):
+        self._footprint = value
 
     @functools.cached_property
     def names(self) -> list[str]:

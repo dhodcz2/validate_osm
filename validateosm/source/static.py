@@ -1,3 +1,4 @@
+import time
 import abc
 import concurrent.futures
 import dataclasses
@@ -5,6 +6,7 @@ import functools
 import inspect
 import os
 import re
+import warnings
 from pathlib import Path
 from typing import Generator, Any
 from typing import Union, Iterable, Optional, Type, Iterator, Collection
@@ -23,7 +25,8 @@ from validateosm.util.scripts import concat
 class File:
     path: Union[str, Path] = dataclasses.field(repr=False)
     url: Optional[str] = dataclasses.field(repr=False, default=None)
-    columns: Union[None, list[str], str] = dataclasses.field(repr=False, default=None)
+
+    # columns: Union[None, list[str], str] = dataclasses.field(repr=False, default=None)
 
     def __post_init__(self):
         self.path = Path(self.path)
@@ -73,7 +76,7 @@ class StaticBase(abc.ABC):
     crs: Any
     flipped: bool = False
     project_args = project_args
-    columns: Optional[list[str]]
+    preprocess: bool = True
 
     def crs(self) -> Any:
         ...
@@ -101,35 +104,39 @@ class StaticBase(abc.ABC):
             cls,
             file: File,
             bbox: Optional[shapely.geometry.Polygon] = None,
-            columns: Optional[list[str]] = None
+            debug=False
+            # columns: Optional[list[str]] = None
     ) -> Union[pd.DataFrame, gpd.GeoDataFrame]:
+        # TODO: Why is file.path different than file.name?
         gdf: Union[gpd.GeoDataFrame, pd.DataFrame]
-        from validateosm.source import Source
-        match file.name.rpartition('.')[2]:
+        t = time.time()
+        print(f'reading {file.path.name}')
+        match file.path.name.rpartition('.')[2]:
             # TODO: Try to laod with geopandas if possible so that bbox can reduce memory load
             case 'feather':
                 try:
-                    gdf = gpd.read_feather(file.path, columns=columns)
+                    gdf = gpd.read_feather(file.path)
                 except (AttributeError, TypeError):
-                    gdf = pd.read_feather(file.path, columns=columns)
+                    gdf = pd.read_feather(file.path, )
                 if isinstance(gdf, gpd.GeoDataFrame) and bbox is not None:
                     gdf = gdf[gdf.within(bbox)]
-                if project_args.debug:
+                if debug:
                     gdf = gdf.head(100)
             case 'parquet':
                 try:
-                    gdf = gpd.read_parquet(file.path, columns=columns)
+                    gdf = gpd.read_parquet(file.path, )
                 except (AttributeError, TypeError):
-                    gdf = pd.read_parquet(file.path, columns=columns)
+                    gdf = pd.read_parquet(file.path, )
                 if isinstance(gdf, gpd.GeoDataFrame) and bbox is not None:
                     gdf = gdf[gdf.within(bbox)]
-                if project_args.debug:
+                if debug:
                     gdf = gdf.head(100)
             case _:
                 try:
-                    gdf = gpd.read_file(file.path, rows=100 if project_args.debug else None, bbox=bbox)
+                    gdf = gpd.read_file(file.path, rows=100 if debug else None, bbox=bbox)
                 except (AttributeError, TypeError) as e:
                     raise NotImplementedError from e
+        print(f'{file.name} took {(time.time() - t) / 60} minutes to load.')
         return gdf
 
     @classmethod
@@ -137,20 +144,21 @@ class StaticBase(abc.ABC):
             cls,
             files: list[File],
             bbox: Optional[shapely.geometry.Polygon] = None,
-            columns: Optional[list[str]] = None
+            columns: Optional[list[str]] = None,
+            preprocess: bool = True
     ) -> Union[pd.DataFrame, gpd.GeoDataFrame]:
-        to_get = [
+        download = [
             file for file in files
             if not file.path.exists()
         ]
-        if to_get:
+        if download:
             # Make all the parent directories
-            for file in to_get:
+            for file in download:
                 if not file.path.parent.exists():
                     os.makedirs(file.path.parent)
             msg = (
                     'fetching\n\t' +
-                    '\n\t'.join(file.name for file in to_get) +
+                    '\n\t'.join(file.name for file in download) +
                     '...'
             )
             print(msg)
@@ -158,13 +166,34 @@ class StaticBase(abc.ABC):
                     concurrent.futures.ThreadPoolExecutor() as te:
                 future_url_request = [
                     te.submit(download, session, file)
-                    for file in to_get
+                    for file in download
                 ]
                 print('downloading')
                 processes = []
                 for future in concurrent.futures.as_completed(future_url_request):
                     processes.append(future.result())
                 print('done!')
+
+        if preprocess:
+            preprocess = [
+                (file, file.path.parent / (file.path.name.rpartition('.')[0] + '.feather'))
+                for file in files
+            ]
+            preprocessing = [(file, path) for file, path in preprocess if not path.exists()]
+            if preprocessing:
+                paths = [path.name for file, path in preprocessing]
+                warnings.warn(f'Preprecessing {paths}; this may take a while.')
+                # TODO: Note: Illinois.geojson.zip is 1.35 GB, but expands in memory to about 5 GB
+                for file, path in preprocessing:
+                    t = time.time()
+                    gdf = cls._from_file(file)
+                    print(f'{file.name} took {(time.time() - t)/60} minutes to load.')
+                    t = time.time()
+                    gdf.to_feather(path)
+                    print(f'{path.name} to {(time.time() - t)/60} minutes to serialize.')
+
+            for file, path in preprocess:
+                file.path = path
 
         dfs: Union[Iterator[gpd.GeoDataFrame], Iterator[pd.DataFrame]] = (
             cls._from_file(file, bbox, columns)
@@ -190,6 +219,18 @@ class StaticBase(abc.ABC):
     def __iter__(self) -> Iterator:
         ...
 
+    @property
+    def bbox(self) -> shapely.geometry.Polygon:
+        bbox = self._instance.bbox.data
+        orientation = (bbox.ellipsoidal if self.flipped else bbox.cartesian)
+        gs = gpd.GeoSeries((orientation,), crs=self.crs)
+        gs = gs.to_crs(self.crs)
+        # I was considering flipping the coords, but maybe just changing ellipsoidal with cartesian is ie
+        # gs = gs.map(lambda geom: shapely.ops.transform(lambda x, y, z=None: (y, x, z), geom))
+
+        bbox: shapely.geometry.Polygon = gs.iloc[0]
+        return bbox
+
 
 class StaticNaive(StaticBase):
     files: list[File]
@@ -200,6 +241,7 @@ class StaticNaive(StaticBase):
             crs: Any,
             flipped=False,
             unzipped=None,
+            preprocess: bool = True,
             columns: Union[None, list[str], None] = None
     ):
         if not isinstance(files, File):
@@ -215,6 +257,7 @@ class StaticNaive(StaticBase):
         self.unzipped = unzipped
         self.columns = columns
         self._cache = None
+        self.preprocess = preprocess
 
     def __get__(self, instance, owner):
         from validateosm.source import Source
@@ -223,12 +266,12 @@ class StaticNaive(StaticBase):
         if self._instance is None:
             return self
         if self._cache is None:
-            self._cache = self._from_files(self.files)
+            self._cache = self._from_files(self.files, self.bbox)
         return self._cache
 
     @classmethod
     def from_files(cls) -> gpd.GeoDataFrame:
-        return cls._from_files(cls.files, columns=cls.columns)
+        return cls._from_files(cls.files)
 
 
 class StaticRegional(StaticBase, abc.ABC):
@@ -272,10 +315,8 @@ class StaticRegional(StaticBase, abc.ABC):
         return set(self._menu.keys())
 
     def __getitem__(self, items: Union[str, Polygon, list, tuple]) -> gpd.GeoDataFrame:
-        print(items)
         if not isinstance(items, tuple):
             items = (items,)
-        print(items)
 
         def gen() -> Iterator[File]:
             for item in items:
@@ -295,13 +336,15 @@ class StaticRegional(StaticBase, abc.ABC):
                     raise TypeError(item)
 
         files = list(gen())
-        return self._from_files(files)
+        return self._from_files(files, bbox=self.bbox)
 
     def __get__(self, instance, owner) -> gpd.GeoDataFrame:
         from validateosm.source import Source
         self._instance = instance
         self._owner: Type[Source] = owner
-        return self[self._owner.bbox.resource.cartesian]
+        if instance is None:
+            return self
+        return self[self.bbox]
 
     def __contains__(self, item: Union[str, Polygon]):
         match item:

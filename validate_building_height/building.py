@@ -12,10 +12,10 @@ import pandas as pd
 from geopandas import GeoDataFrame
 
 from validateosm.source import data, Source, SourceOSM
-from validateosm.source.footprint import Footprint
+from validateosm.source.footprint import CallableFootprint
 
 
-class BuildingFootprint(Footprint):
+class BuildingCallableFootprint(CallableFootprint):
     def identity(self, gdf: GeoDataFrame) -> pd.Series:
         def ubid():
             warnings.filterwarnings('ignore', 'geographic CRS')
@@ -37,7 +37,7 @@ class BuildingFootprint(Footprint):
 
 
 class BuildingSource(Source, abc.ABC):
-    footprint = BuildingFootprint
+    footprint = BuildingCallableFootprint
 
     @staticmethod
     def exclude(self) -> Optional[numpy.typing.NDArray[bool]]:
@@ -105,15 +105,15 @@ class BuildingSource(Source, abc.ABC):
         """The date at which the building began construction"""
 
 
-class SourceOSMBuilding(SourceOSM, BuildingSource, abc.ABC):
+class BuildingSourceOSM(SourceOSM, BuildingSource, abc.ABC):
     def address(self) -> Iterable[object]:
         housenums = (
             element.tag('addr:housenumber')
-            for element in self.source
+            for element in self.resource
         )
         streets = (
             element.tag('addr:street')
-            for element in self.source
+            for element in self.resource
         )
         yield from (
             ' '.join((housenum, street))
@@ -125,7 +125,7 @@ class SourceOSMBuilding(SourceOSM, BuildingSource, abc.ABC):
     def start_date(self) -> Iterable[datetime.datetime]:
         start_dates: Iterator[Optional[datetime.datetime]] = (
             element.tag('start_date')
-            for element in self.source
+            for element in self.resource
         )
         for start_date in start_dates:
             try:
@@ -157,8 +157,8 @@ class SourceOSMBuilding(SourceOSM, BuildingSource, abc.ABC):
             raise ValueError(type)
 
     def containers(self) -> Iterable[bool]:
-        ids = (ele.id() for ele in self.source)
-        buildings = (ele.tag('building') for ele in self.source)
+        ids = (ele.id() for ele in self.resource)
+        buildings = (ele.tag('building') for ele in self.resource)
         data: GeoDataFrame = self.data
         if self.ways:
             exclusion = {'roof', 'no', 'bridge', None}

@@ -1,3 +1,7 @@
+from typing import Iterator
+from validateosm.source.source import Source
+from validateosm.source.footprint import CallableFootprint
+from weakref import WeakKeyDictionary
 import dataclasses
 import os
 import warnings
@@ -30,60 +34,76 @@ class StructData:
 
 
 class DescriptorData:
+    cache: WeakKeyDictionary[object, GeoDataFrame] = WeakKeyDictionary()
+
     def __init__(self):
         self._instance = None
         self._owner = None
-        self._data = None
 
     def __get__(self, instance, owner) -> Union[GeoDataFrame, 'DescriptorData']:
+        # Problem is, this is done infinitely because self._instance.ignore_file = True
         self._instance = instance
         self._owner = owner
-        if self._instance is None:
+        if instance is None:
             return self
-        elif self._data is not None:
-            return self._data
-        elif self.path.exists() and not instance.ignore_file:
-            self._data = data = gpd.read_feather(self.path)
-            warnings.warn(f"{repr(self._instance)}.data has been loaded from cache. To force a redo, assign "
-                          f"{repr(self._instance)}=True")
-            return data
+        if instance in self.cache:
+            return self.cache[instance]
+        path = self.path
+        # TODO: Perhaps if there is a file with a bbox that contains instance.bbox, load
+        #   that bbox, .within it,
+        if path.exists() and not instance.ignore_file:
+            data = self.cache[instance] = gpd.read_feather(path)
         else:
-            from validateosm.compare.compare import Compare
-            self._instance: Compare = instance
-            self._owner: Type[Compare] = owner
+            data = self.cache[instance] = self._data()
+            if not path.parent.exists():
+                os.makedirs(path.parent)
+            data.to_feather(path)
+        return data
 
-            # We must concatenate DataFrames instead of going purely by Series because some columns
-            #   may return a single-value, which must be repeated to the same length of other columns
-            # To preserve SourceOSM.relation and SourceOSM.way indices, we must first
-            def datas() -> Generator[gpd.GeoDataFrame, None, None]:
-                for name, source in self._instance.sources.items():
-                    data: GeoDataFrame = source.data
-                    data['name'] = name
-                    if 'relation' not in data:
-                        data['relation'] = np.nan
-                    if 'way' not in data:
-                        data['way'] = np.nan
-                    yield data.set_index(['name', 'relation', 'way'])
-                    del source.data
+    def _data(self) -> GeoDataFrame:
+        from validateosm.compare.compare import Compare
+        self._instance: Compare
+        self._owner: Type[Compare]
 
-            # self._data must be set for footprint to not cause inifinite recursion
-            try:
-                data = self._data = concat(datas())
-                data = self._data = self._instance.footprint(data)
-            except Exception as e:
-                # If something happens, we don't want a half-formed _data
-                del self._data
-                raise e
+        # We must concatenate DataFrames instead of going purely by Series because some columns
+        #   may return a single-value, which must be repeated to the same length of other columns
+        # To preserve SourceOSM.relation and SourceOSM.way indices, we must first
+        def datas() -> Generator[gpd.GeoDataFrame, None, None]:
+            for name, source in self._instance.sources.items():
+                data: GeoDataFrame = source.data
+                data = data.reset_index()
+                data['name'] = name
+                if 'id' not in data:
+                    data['id'] = np.nan
+                if 'group' not in data:
+                    data['group'] = np.nan
+                data = data.set_index(['name', 'id', 'group'], drop=True)
+                yield data
+                del source.data
 
-            data = self._data = data.sort_index(axis=0)
+        data = concat(datas())
 
-            if not self.path.parent.exists():
-                os.makedirs(self.path.parent)
-            data.to_feather(self.path)
-            return data
+        # Instantiate Compare.footprint; use it to group Compare.data
+        sources = self._instance.sources.values()
+        footprints: Iterator[tuple[Type[CallableFootprint], Source]] = zip(
+            (source.footprint for source in sources), sources
+        )
+        footprint, source = next(footprints)
+        for other_footprint, other_source in footprints:
+            if other_footprint is not footprint:
+                raise ValueError(f"{source.__class__.__name__}.footprint!={other_source.__class__.name}.footprint")
+        footprint = self._instance.footprint = footprint(data)
+
+        data = footprint(data)
+        data = data.sort_index(axis=0)
+        return data
 
     def __delete__(self, instance):
-        del self._data
+        if instance in self.cache:
+            del self.cache[instance]
+
+    def __set__(self, instance, value):
+        self.cache[instance] = value
 
     def __repr__(self):
         return f'{self._instance}.data'
@@ -99,7 +119,12 @@ class DescriptorData:
     def path(self) -> Path:
         from validateosm.compare.compare import Compare
         self._instance: Compare
-        return self._instance.directory / (self.__class__.__name__ + '.feather')
+        # return self._instance.directory / (self.__class__.__name__ + '.feather')
+        return (
+            self._instance.directory /
+            self.__class__.__name__ /
+            f'{str(self._instance.bbox)}.feather'
+        )
 
     def delete(self):
         os.remove(self.path)

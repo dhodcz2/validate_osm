@@ -1,6 +1,6 @@
 import functools
 import itertools
-from typing import Generator, Union, Collection
+from typing import Generator, Union, Collection, Optional
 from typing import Hashable
 
 import geopandas as gpd
@@ -13,34 +13,30 @@ from networkx import connected_components
 from shapely.geometry.base import BaseGeometry
 
 
-class Footprint:
-    # TODO: Footprint cannot be used as a descriptor because it is a member of Source
+class CallableFootprint:
+    # def ini
+    # def __init__(self, compare: object):
+    #     from validateosm.compare.compare import Compare
+    #     if not isinstance(compare, Compare):
+    #         raise TypeError(compare)
+    #     else:
+    #         self.compare = compare
+    #     self.footprints: Optional[GeoDataFrame] = None
 
-    def __init__(self, compare: object):
-        from validateosm.compare.compare import Compare
-        if not isinstance(compare, Compare):
-            raise TypeError(compare)
-        else:
-            self.compare = compare
+    def __init__(self, data: GeoDataFrame):
+        self.footprints = self._footprints(data)
 
-    def __len__(self):
-        return len(self.footprints)
-
-    @functools.cached_property
-    def footprints(self) -> GeoDataFrame:
-        # Because instance.redo == True, this will cause another recursion of instance.data
-        data = self.compare.data[['geometry', 'centroid']].copy()
+    def _footprints(self, data: GeoDataFrame) -> GeoDataFrame:
+        data = data[['geometry', 'centroid']].copy()
         data['geometry'] = data['geometry'].to_crs(3857)
         data['centroid'] = data['centroid'].to_crs(3857)
 
         # FIrst, aggregate the geometries where relation or way are identical.
         G = networkx.Graph()
-        for way in data.groupby('way').indices.values():
-            G.add_nodes_from(way)
-            G.add_edges_from(zip(way[:-1], way[1:]))
-        for relation in data.groupby('relation').indices.values():
-            G.add_nodes_from(relation)
-            G.add_edges_from(zip(relation[:-1], relation[1:]))
+        # TODO: Check that this is functional
+        for iloc in data.groupby(['name', 'group']).indices.values():
+            G.add_nodes_from(iloc)
+            G.add_edges_from(zip(iloc[:-1], iloc[1:]))
         groups = connected_components(G)
         grouped: list[Collection[int]] = [
             group for group in groups
@@ -110,7 +106,6 @@ class Footprint:
                 else:
                     yield c.iloc[iloc].unary_union.centroid
 
-        # footprints = GeoDataFrame({'geometry': geometry(), 'centroid': centroid()})
         footprints = GeoDataFrame({
             'geometry': gpd.GeoSeries(geometry(), crs=data['geometry'].crs),
             'centroid': gpd.GeoSeries(centroid(), crs=data['centroid'].crs)
@@ -133,11 +128,7 @@ class Footprint:
         annoy.build(10)
         return annoy
 
-    def __call__(self, data: Union[str, GeoDataFrame]) -> GeoDataFrame:
-        if isinstance(data, str):
-            data: GeoDataFrame = self.compare.data.xs(data)
-        elif not isinstance(data, GeoDataFrame):
-            raise TypeError(type(data))
+    def __call__(self, data: GeoDataFrame) -> GeoDataFrame:
         data['geometry'] = data['geometry'].to_crs(3857)
         data['centroid'] = data['centroid'].to_crs(3857)
         data['area'] = data['geometry'].area
@@ -155,12 +146,9 @@ class Footprint:
                     yield match.name
                     break
 
-        # print(data.index.names)
         index = pd.Series(footprint(), index=data.index, name=footprints.index.name)
-        # print(index.index.names)
         names = [footprints.index.name, *data.index.names]
         data = data.set_index(index, drop=False, append=True)
-        # print(names)
         data = data.reorder_levels(names)
         data = data.sort_index()
         return data

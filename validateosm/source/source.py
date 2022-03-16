@@ -13,9 +13,10 @@ import shapely.geometry.base
 import shapely.ops
 from geopandas import GeoSeries, GeoDataFrame
 
+# TODO If self.bbox is not self.__class__.bbox
 from validateosm.source.aggregate import AggregateFactory
 from validateosm.source.data import DecoratorData, DescriptorData
-from validateosm.source.footprint import Footprint
+from validateosm.source.footprint import CallableFootprint
 from validateosm.source.groups import (
     DescriptorGroup,
     Groups
@@ -36,6 +37,12 @@ class BBoxStruct:
             round(bound, 2)
             for bound in self.ellipsoidal.bounds
         ])
+
+    def __str__(self):
+        return '_'.join(
+            str(round(bound, 5))
+            for bound in self.ellipsoidal.bounds
+        )
 
 
 class BBox:
@@ -66,27 +73,49 @@ class BBox:
     def __repr__(self):
         return self.data.__repr__()
 
-    @property
-    def resource(self) -> BBoxStruct:
-        if self._owner not in self._cache_static:
-            d = self.data
-            gs = gpd.GeoSeries((d.ellipsoidal, d.cartesian), crs=d.crs)
-            static = self._owner.resource
-            if static.flipped:
-                cartesian, ellipsoidal = gs.to_crs(static.crs)
-            else:
-                ellipsoidal, cartesian = gs.to_crs(static.crs)
+    def __str__(self):
+        return self.data.__str__()
 
-            # I was considering flipping the coords, but maybe just changing ellipsoidal with cartesian is ie
-            # gs = gs.map(lambda geom: shapely.ops.transform(lambda x, y, z=None: (y, x, z), geom))
-            bbox = BBoxStruct(ellipsoidal, cartesian, crs=d.crs)
-            self._cache_static[self._owner] = bbox
-            return bbox
-        else:
-            return self._cache_static[self._owner]
+    # @property
+    # def resource(self) -> BBoxStruct:
+    #     if self._owner not in self._cache_static:
+    #         d = self.data
+    #         gs = gpd.GeoSeries((d.ellipsoidal, d.cartesian), crs=d.crs)
+    #         # TODO: cannot use self.owner.resource because this instantiates the dataframe
+    #         static = self._owner.resource
+    #         if static.flipped:
+    #             cartesian, ellipsoidal = gs.to_crs(static.crs)
+    #         else:
+    #             ellipsoidal, cartesian = gs.to_crs(static.crs)
+    #
+    #         # I was considering flipping the coords, but maybe just changing ellipsoidal with cartesian is ie
+    #         # gs = gs.map(lambda geom: shapely.ops.transform(lambda x, y, z=None: (y, x, z), geom))
+    #         bbox = BBoxStruct(ellipsoidal, cartesian, crs=d.crs)
+    #         self._cache_static[self._owner] = bbox
+    #         return bbox
+    #     else:
+    #         return self._cache_static[self._owner]
+    #
+
+class SourceMeta(abc.ABCMeta, type):
+    def __new__(cls, name, bases, local):
+        object = super(SourceMeta, cls).__new__(cls, name, bases, local)
+        if '_data' not in local:
+            setattr(object, '_data', {})
+        return object
 
 
-class Source(abc.ABC):
+class Source(abc.ABC, metaclass=SourceMeta):
+    def __init__(self, ignore_file=False):
+        abstracts = [
+            struct
+            for struct in self.__class__.data.structs.values()
+            if struct.abstract
+        ]
+        if abstracts:
+            raise TypeError(f"{self.__class__.__name__} inherited abstract methods for its data: {abstracts}")
+        self.ignore_file = ignore_file
+
     '''
     raw >> data >> groups >> aggregate >> identity >> exclude >> batch
 
@@ -96,7 +125,7 @@ class Source(abc.ABC):
 
     resource: Union[gpd.GeoDataFrame, StaticBase]
     data: Union[DescriptorData, GeoDataFrame] = DescriptorData()
-    footprint: Type[Footprint] = Footprint
+    footprint: Type[CallableFootprint] = CallableFootprint
     # groups: Union[Groups, DescriptorGroup] = DescriptorGroup()
     aggregate_factory: AggregateFactory = AggregateFactory()
     name: str

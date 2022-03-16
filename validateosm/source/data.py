@@ -1,12 +1,8 @@
-import abc
-import contextlib
 import dataclasses
-import functools
 import inspect
-import itertools
 import warnings
 from collections import UserDict
-from typing import Callable, Any, Iterator, Union, Type
+from typing import Callable, Any, Iterator, Union
 from weakref import WeakKeyDictionary
 
 import pandas
@@ -16,12 +12,12 @@ from pandas import Series
 from pandas.core.indexes.range import RangeIndex
 
 from validateosm.source.pipe import DescriptorPipeSerialize
-from validateosm.util.scripts import concat
 
 
 @dataclasses.dataclass
 class StructData:
     name: str
+    cls: str
     func: Callable
     dtype: str
     subtype: type
@@ -36,11 +32,15 @@ class StructData:
         return self.name == other
 
     def __repr__(self):
-        return self.func.__qualname__
+        # return f"{self.__class__.__name__}[{self.cls}" \
+        #        f"{('.' + self.func.__qualname__) if isinstance(self.func, Callable) else ''}]"
+        return f"{self.__class__.__name__}[{self.name} from {self.cls}]"
 
     @property
     def decorated_func(self):
         def wrapper(source: object):
+            if self.abstract:
+                raise TypeError(f"{self.__repr__()} is abstract method.")
             obj: object = self.func(source)
             # Expect a GeoSeries
             if self.dtype == 'geometry':
@@ -81,6 +81,9 @@ class _DecoratorData:
     args = ['self']
 
     def __call__(self, func: Callable) -> Callable:
+        # TODO: Not every class is pointing to the same dict; however, if _DecoratorData.__call__ is not called,
+        #   the class will inherit _data instead of having an independent _data. How do we fix this?
+
         argspec = inspect.getfullargspec(func)
         if argspec.args != self.args:
             raise SyntaxError(
@@ -94,6 +97,7 @@ class _DecoratorData:
         _data[name] = StructData(
             name=func.__name__,
             func=func,
+            cls=frame.frame.f_locals['__qualname__'],
             dtype=self.dtype,
             subtype=self.__class__,
             abstract=getattr(func, '__isabstractmethod__', False),
@@ -122,121 +126,22 @@ class DecoratorData(_DecoratorData):
         """
 
 
-# class CacheStructs(UserDict):
-#     """
-#     Inherits structures from the Source's MRO which will determine the attributes of the Series to be extracted
-#     in the process of self.raw to self.data
-#     """
-#
-#     def implications(self, source: type) -> list[dict[str, StructData]]:
-#         # from validateosm.source import Source
-#         # sources: Iterator[Type[Source]] = [
-#         #     s for s in source.mro()[::-1]
-#         #     if issubclass(s, Source)
-#         # ]
-#         # # TODO: Something's wrong with implications
-#         # implications: list[dict[str, StructData]] = [
-#         #     self.data[source]
-#         #     if source in self.data
-#         #     else getattr(source, '_data')
-#         #     for source in sources
-#         # ]
-#         # implications.reverse()  # Linear if constructed right-to-left; x^2 if constructed left-to-right
-#         #
-#
-#         from validateosm.source.source import Source
-#         sources: Iterator[Type[Source]] = [
-#             s for s in source.mro()[::-1]
-#             if issubclass(s, Source)
-#         ]
-#         implications: list[dict[StructData]] = [
-#             self.data[source]
-#             for source in sources
-#         ]
-#
-#     def __missing__(self, source: type) -> dict[str, StructData]:
-#         implications = self.implications(source)
-#         names: set[str] = {
-#             name
-#             for implication in implications
-#             for name in implication.keys()
-#         }
-#
-#         def inherit(name: str) -> StructData:
-#             try:
-#                 func = source.__dict__[name]
-#             except KeyError:
-#                 func = None
-#             else:
-#                 if getattr(func, '__isabstractmethod__', False):
-#                     func = None
-#                 else:
-#                     abstract = False
-#
-#             # Inherit method from mro, ignoring abstract methods
-#             structs: Iterator[StructData] = (
-#                 imp[name]
-#                 for imp in implications
-#                 if name in imp
-#             )
-#             struct = next(structs)
-#             dtype = struct.dtype
-#             subtype = struct.subtype
-#             crs = struct.crs
-#             dependent = struct.dependent
-#             if func is not None:
-#                 pass
-#             elif not struct.abstract:
-#                 func = struct.func
-#                 abstract = True
-#             else:
-#                 try:
-#                     func = next(
-#                         struct.func
-#                         for struct in structs
-#                         if not struct.abstract
-#                     )
-#                 except StopIteration as e:
-#                     # Abstract methods are not problematic if abc.ABC
-#                     if isinstance(source, abc.ABC):
-#                         func = None
-#                         abstract = True
-#                     # If not abc.ABC, then only abstract methods were found
-#                     else:
-#                         raise NotImplementedError(
-#                             f"{source.__name__}.{name} inheritance could not be resolved."
-#                         ) from e
-#                 else:
-#                     abstract = False
-#             return StructData(
-#                 name=name,
-#                 func=func,
-#                 dtype=dtype,
-#                 subtype=subtype,
-#                 abstract=abstract,
-#                 crs=crs,
-#                 dependent=dependent
-#             )
-#
-#         result = {name: inherit(name) for name in names}
-#         self.data[source] = result
-#         return result
-
-
 class CacheStructs(UserDict):
     data: dict[type, dict[str, StructData]]
 
     def __missing__(self, source: type) -> dict[str, StructData]:
         from validateosm.source.source import Source
-        sources = (
+        sources = [
             s for s in source.mro()[:0:-1]
             if issubclass(s, Source)
-        )
+        ]
+        # start reversed to maintain O(x) instead of O(x^2)
         inheritances = [
             self.__getitem__(source)
             # self.data[source]
             for source in sources
         ]
+        inheritances.reverse()  # undo reverse; we check the top inheritances first
         names: set[str] = set(getattr(source, '_data', {}).keys())
         names.update(
             key for inherit in inheritances
@@ -244,49 +149,62 @@ class CacheStructs(UserDict):
         )
 
         def inherit(name: str) -> StructData:
-            if hasattr(source, '_data') and name in (structs := getattr(source, '_data')):
+            # Base case: the class has decorated a function with @data
+
+            if hasattr(source, '_data') and name in (structs := getattr(source, '_data', {})):
                 return structs[name]
-            if name in source.__dict__:
-                func = source.__dict__[name]
-                abstract = getattr(func, '__isabstractmethod__', False)
-            else:
-                func = None
-            structs: Iterator[StructData] = (
+
+            struct_list: Iterator[StructData] = [
                 inherit[name]
                 for inherit in inheritances
                 if name in inherit
-            )
-            struct = next(structs)
+            ]
+            structs = iter(struct_list)
+            try:
+                struct = next(structs)
+            except StopIteration as e:
+                raise RuntimeError from e
+
+            # Get first inheritance
             dtype = struct.dtype
             subtype = struct.subtype
             crs = struct.crs
             dependent = struct.dependent
-            if func is not None:
-                pass
-            elif not struct.abstract:
-                func = struct.func
-                abstract = False
+
+
+            if name in source.__dict__:
+                func = getattr(source, name)
+                abstract = getattr(func, '__isabstractmethod__', False)
+                if abstract:
+                    raise RuntimeError(f"{source=}; {name=}, {abstract=}")
+                cls = source.__name__
             else:
-                try:
-                    func = next(
-                        struct.func
-                        for struct in structs
-                        if not struct.abstract
-                    )
-                except StopIteration as e:
-                    # Abstract methods are not problematic if abc.ABC
-                    if isinstance(source, abc.ABC):
-                        func = None
-                        abstract = True
-                    # If not abc.ABC, then only abstract methods were found
-                    else:
-                        raise NotImplementedError(
-                            f"{source.__name__}.{name} inheritance could not be resolved."
-                        ) from e
-                else:
-                    abstract = False
-            return StructData(name=name, func=func, dtype=dtype, subtype=subtype, abstract=abstract, crs=crs,
-                              dependent=dependent)
+                # Get first inheritance that isn't abstract
+                if struct.abstract:
+                    for struct in structs:
+                        if not struct.abstract:
+                            break
+                abstract = struct.abstract
+                func = struct.func
+                cls = struct.cls
+
+            # if source.__name__ == 'EastUicDynamicOSM':
+            #     ...
+            # if source.__name__ == 'HeightOSM':
+            #     ...
+
+
+
+            return StructData(
+                name=name,
+                func=func,
+                dtype=dtype,
+                subtype=subtype,
+                abstract=abstract,
+                crs=crs,
+                cls=cls,
+                dependent=dependent
+            )
 
         result = self.data[source] = {name: inherit(name) for name in names}
         return result
@@ -307,9 +225,9 @@ class CacheData(UserDict):
         from validateosm.source.source import Source
         source: Source
         data = self.data[source] = self.resolve(source)
-        source.group()
         if 'group' not in self.data[source].index.names:
             raise ValueError(f"{source.group.__qualname__} has not assigned a group index")
+        print(f'{source.__class__.__name__}.data')
         return data
 
     def resolve(self, source: object):
@@ -352,6 +270,7 @@ class CacheData(UserDict):
                 )
                 # data[struct.name] = series.repeat(rows) if len(series) == 1 else series
             depend.difference_update(viable)
+        data = source.group()
         return data
 
     # def __missing__(self, key):
@@ -430,6 +349,8 @@ class DescriptorData(DescriptorPipeSerialize):
 
     _cache = CacheData()
 
+    __get__: Union[GeoDataFrame, 'DescriptorData']
+
     @property
     def validating(self) -> set[str]:
         structs = self._cache.structs[self._owner]
@@ -447,3 +368,7 @@ class DescriptorData(DescriptorPipeSerialize):
             for name, struct in structs.items()
             if struct.subtype is DecoratorData.identifier
         }
+
+    @property
+    def structs(self) -> dict[str, StructData]:
+        return self._cache.structs[self._owner]
