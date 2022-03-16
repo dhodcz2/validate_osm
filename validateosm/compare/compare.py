@@ -11,11 +11,13 @@ from validateosm.source.footprint import CallableFootprint
 from validateosm.source.source import (
     Source, BBox
 )
+from validateosm.compare.plot import DescriptorPlot
 
 
 class Compare:
     data = DescriptorData()
     aggregate = DescriptorAggregate()
+    plot = DescriptorPlot()
     batch: Union[GeoDataFrame]
     sources: dict[str, Source]
 

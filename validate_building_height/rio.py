@@ -1,12 +1,9 @@
 import datetime
 
-from validateosm.source import *
-from validateosm.source.static import File
-from validate_building_height.base import Height, HeightOSM
 from validate_building_height.base import (
     Height, HeightOSM
 )
-import abc
+from validateosm.source import *
 
 
 class HeightRioDeJaneiro(Height):

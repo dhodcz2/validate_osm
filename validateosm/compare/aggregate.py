@@ -67,6 +67,7 @@ class DescriptorAggregate:
             if other_factory.__class__ is not factory.__class__:
                 raise ValueError(f"{source.__class__.__name__}.factory!={other_source.__class__.name}.factory")
         result = factory(groups)
+        result['iloc'] = range(len(result))
         return result
 
     def __delete__(self, instance):

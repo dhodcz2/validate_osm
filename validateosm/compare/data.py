@@ -96,6 +96,7 @@ class DescriptorData:
 
         data = footprint(data)
         data = data.sort_index(axis=0)
+        data['iloc'] = range(len(data))
         return data
 
     def __delete__(self, instance):

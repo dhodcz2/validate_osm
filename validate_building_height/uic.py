@@ -1,14 +1,12 @@
+import abc
 import datetime
 
-from validateosm.source import *
-from validateosm.source.static import File
 # TODO: For some reason if I do not specifically import from source.static instead of source,
 #   isinstance(files, File) in static.py will return False instead of True
 from validate_building_height.base import Height, HeightOSM
-
-import abc
-
+from validateosm.source import *
 from validateosm.source import BBox
+from validateosm.source.static import File
 
 
 class HeightEastUIC(Height, abc.ABC):
@@ -79,9 +77,6 @@ class DynamicEastUicMSBF(EastUicMSBF):
 #         ...
 
 
-from validateosm.source.source_osm import SourceOSM
-
-
 class EastUicOSM(HeightOSM, HeightEastUIC):
     # TODO: Problem is that cannot be instantiated, because HeightOSM.floors is not abstract but EastUIC.floors is
     name = 'osm'
@@ -95,3 +90,4 @@ if __name__ == '__main__':
     data = compare.data
     footprints = compare.footprint.footprints
     aggregate = compare.aggregate
+    compare.plot.matches()

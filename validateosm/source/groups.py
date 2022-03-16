@@ -66,24 +66,35 @@ class Groups:
 
     @functools.cached_property
     def index(self):
-        index_ungrouped = (
-            tuple[:2]
-            for tuple in self.data.iloc[self._ungrouped].index
-        )
-        index = self.data.index
-        members = (
-            group[0]
-            for group in self._grouped
-        )
-        index_grouped = (
-            index[member][:-2]
-            for member in members
-        )
-        return pd.MultiIndex.from_tuples(
-            itertools.chain(index_ungrouped, index_grouped),
-            names=self.data.index.names[:2]
-        )
-
+        # index_ungrouped = [
+        #     tuple[:2]
+        #     for tuple in self.data.iloc[self._ungrouped].index
+        # ]
+        # index = self.data.index
+        # members = (
+        #     group[0]
+        #     for group in self._grouped
+        # )
+        # index_grouped = [
+        #     index[member][:-2]
+        #     for member in members
+        # ]
+        # return pd.MultiIndex.from_tuples(
+        #     itertools.chain(index_ungrouped, index_grouped),
+        #     names=self.data.index.names[:2]
+        # )
+        ungrouped: pd.MultiIndex = self.data.iloc[self._ungrouped].index
+        index_ungrouped = zip(ungrouped.get_level_values('ubid'), ungrouped.get_level_values('name'))
+        # grouped = self.grouped
+        # first = [grouped.iloc[0] for group in grouped]
+        first_indices = [
+            df.index[0]
+            for df in self.grouped
+        ]
+        index_grouped = zip((idx[0] for idx in first_indices), (idx[1] for idx in first_indices))
+        # grouped: pd.MultiIndex = self.data.iloc[itertools.chain.from_iterable(self._grouped)].index
+        # index_grouped = zip(grouped.get_level_values('ubid'), grouped.get_level_values('name'))
+        return pd.MultiIndex.from_tuples(itertools.chain(index_ungrouped, index_grouped), names=['ubid', 'name'])
 
 
 @dataclasses.dataclass
