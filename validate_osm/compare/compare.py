@@ -1,5 +1,6 @@
 import functools
 import inspect
+import logging
 from pathlib import Path
 from typing import Union, Iterable, Type, Hashable, Optional
 
@@ -13,6 +14,7 @@ from validate_osm.source.footprint import CallableFootprint
 from validate_osm.source.source import (
     Source, BBox
 )
+from validate_osm.args import global_args
 
 
 class Compare:
@@ -22,8 +24,14 @@ class Compare:
     batch: Union[GeoDataFrame]
     sources: dict[str, Source]
 
-
-    def __init__(self, *sources: Type[Source] | Iterable[Type[Source]], ignore_file=False, bbox: BBox = None):
+    def __init__(
+            self,
+            bbox: BBox,
+            *sources: Type[Source] | Iterable[Type[Source]],
+            ignore_file=False,
+            debug: bool = False,
+            verbose: bool = False,
+    ):
         if isinstance(sources, Source):
             sources = (sources,)
         elif isinstance(sources, Iterable):
@@ -41,8 +49,15 @@ class Compare:
             for source in self.sources.values():
                 source.bbox = bbox
         self.bbox = bbox
-
         self._footprint = None
+        logging.basicConfig(
+            level=(
+                logging.DEBUG if debug else
+                logging.INFO if verbose else
+                logging.WARNING
+            ),
+            format='%(asctime)s - %(levelname)s - %(message)s'
+        )
 
     @property
     def footprint(self) -> CallableFootprint:
@@ -53,6 +68,11 @@ class Compare:
     @footprint.setter
     def footprint(self, value):
         self._footprint = value
+
+    @footprint.deleter
+    def footprint(self):
+        logging.warning(f'footprints cannot be regenerated until compare.data is regenerated')
+        del self._footprint
 
     @functools.cached_property
     def names(self) -> list[str]:

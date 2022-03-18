@@ -1,3 +1,4 @@
+import logging
 from typing import Callable
 
 from geopandas import GeoDataFrame, GeoSeries
@@ -6,6 +7,7 @@ from validate_osm.source.groups import Groups
 
 
 class AggregateFactory:
+
     def __call__(self, groups: Groups):
         self.groups = groups
         functions = (
@@ -15,6 +17,7 @@ class AggregateFactory:
             if not name.startswith('_')
                and isinstance(func, Callable)
         )
+
         result = GeoDataFrame({
             name: func(self)
             for name, func in functions

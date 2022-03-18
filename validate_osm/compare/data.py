@@ -1,3 +1,4 @@
+import logging
 from typing import Iterator
 from validate_osm.source.source import Source
 from validate_osm.source.footprint import CallableFootprint
@@ -40,8 +41,7 @@ class DescriptorData:
         self._instance = None
         self._owner = None
 
-    def __get__(self, instance, owner) -> Union[GeoDataFrame, 'DescriptorData']:
-        # Problem is, this is done infinitely because self._instance.ignore_file = True
+    def __get__(self, instance: object, owner: Type) -> Union[GeoDataFrame, 'DescriptorData']:
         self._instance = instance
         self._owner = owner
         if instance is None:
@@ -52,11 +52,14 @@ class DescriptorData:
         # TODO: Perhaps if there is a file with a bbox that contains instance.bbox, load
         #   that bbox, .within it,
         if path.exists() and not instance.ignore_file:
+            logging.info(f'reading {owner.__name__}.data from {path}')
             data = self.cache[instance] = gpd.read_feather(path)
         else:
+            logging.info(f'building {owner.__name__}.data')
             data = self.cache[instance] = self._data()
             if not path.parent.exists():
                 os.makedirs(path.parent)
+            logging.info(f'serializing {owner.__name__}.data {path}')
             data.to_feather(path)
         return data
 
@@ -79,9 +82,18 @@ class DescriptorData:
                     data['group'] = np.nan
                 data = data.set_index(['name', 'id', 'group'], drop=True)
                 yield data
+                logging.debug(f'{self.__class__.__name__}.data done; deleting {source.resource.__class__.__name__}')
                 del source.data
 
+        logging.debug(f'concatenating {self.__class__.__name__}.data')
         data = concat(datas())
+
+        # TODO: Investigate how these invalid geometries came to be
+        inval = data[data['geometry'].isna() | data['centroid'].isna()].index
+        if len(inval):
+            logging.warning(f'no geom: {inval}')
+            data = data.drop(index=inval)
+
 
         # Instantiate Compare.footprint; use it to group Compare.data
         sources = self._instance.sources.values()

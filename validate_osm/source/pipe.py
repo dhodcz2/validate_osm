@@ -1,3 +1,4 @@
+import logging
 from weakref import WeakKeyDictionary
 import geopandas as gpd
 import abc
@@ -12,7 +13,7 @@ class DescriptorPipe:
 
     def __init__(self):
         self._instance = None
-        # self._owner = None
+        self._owner = None
 
     def __get__(self, instance, owner):
         if instance in self._cache:
@@ -36,8 +37,9 @@ class DescriptorPipe:
 
 class DescriptorPipeSerialize(DescriptorPipe, abc.ABC):
     _cache = WeakKeyDictionary[object, gpd.GeoDataFrame]
+    name: str
 
-    def __get__(self, instance, owner):
+    def __get__(self, instance: object, owner: Type):
         # TODO: Never use self._instance from __get__; in the debugger it causes weirdness
         # from validate_osm.source import Source
         # self._instance: Source = instance
@@ -52,6 +54,7 @@ class DescriptorPipeSerialize(DescriptorPipe, abc.ABC):
         #         self._cache[instance].to_feather(path)
         #     return self._cache[instance]
         # return super(DescriptorPipeSerialize, self).__get__(instance, owner)
+
         from validate_osm.source import Source
         instance: Union[Source, object]
         owner: Type[Source]
@@ -63,11 +66,14 @@ class DescriptorPipeSerialize(DescriptorPipe, abc.ABC):
             return self._cache[instance]
         path = self.path
         if not instance.ignore_file and path.exists():
+            logging.info(f'reading {owner.__name__}.{self.name} from {path}')
             data = self._cache[instance] = gpd.read_feather(path)
             return data
+        logging.info(f'building {owner.__name__}.{self.name}')
         data: gpd.GeoDataFrame = self._cache[instance]
         if not path.parent.exists():
             os.makedirs(path.parent)
+        logging.info(f'serializing {owner.__name__}.{self.name} to {path}')
         data.to_feather(path)
         return data
 

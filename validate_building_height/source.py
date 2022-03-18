@@ -3,6 +3,7 @@ import functools
 from typing import Iterable
 
 import numpy as np
+import pandas as pd
 import shapely
 from geopandas import GeoDataFrame
 
@@ -74,26 +75,22 @@ class HeightOSM(BuildingSourceOSM, Height):
 
 
 class HeightChicagoBuildingFootprints(Height):
-    name = 'cbf'
-    link = 'https://data.cityofchicago.org/Buildings/Building-Footprints-current-/hz9b-7nh8'
     resource = StaticNaive(
         files=File(
             url='https://data.cityofchicago.org/api/geospatial/hz9b-7nh8?method=export&format=GeoJSON',
             path=StaticNaive.directory / 'Building Footprints (current).geojson',
         ),
-        crs=4326
+        crs=4326,
+        name='cbf',
+        link='https://data.cityofchicago.org/Buildings/Building-Footprints-current-/hz9b-7nh8'
     )
-
-    @functools.cached_property
-    def resource(self) -> GeoDataFrame:
-        return self.resource
 
     def geometry(self) -> Iterable[shapely.geometry.base.BaseGeometry]:
         return self.resource.geometry.reset_index(drop=True)
 
     def address(self) -> Iterable[object]:
         def generator():
-            for num, dir, name, type in self.resource.loc[:, ['t_add1', 'pre_dir1', 'st_name1', 'st_type1']]:
+            for num, dir, name, type in self.resource.loc[:, ['t_add1', 'pre_dir1', 'st_name1', 'st_type1']].values:
                 if not (name and type):
                     yield None
                     continue
@@ -105,12 +102,26 @@ class HeightChicagoBuildingFootprints(Height):
 
         yield from generator()
 
+    # TODO: TypeError: <U3 cannot be converted to a FloatingDtype
     def floors(self) -> Iterable[float]:
-        yield from (
-            np.nan if floors == 0
-            else floors
-            for floors in self.resource['stories']
-        )
+        # yield from (
+        #     np.nan if floors == 0
+        #     else floors
+        #     for floors in self.resource['stories']
+        # )
+        def gen():
+            for value in self.resource['stories']:
+                try:
+                    v = float(value)
+                except (TypeError, ValueError):
+                    yield np.nan
+                else:
+                    if v == 0:
+                        yield np.nan
+                    else:
+                        yield v
+
+        yield from gen()
 
     def bldg_id(self) -> Iterable[int]:
         return self.resource['bldg_id'].reset_index(drop=True)
@@ -119,11 +130,30 @@ class HeightChicagoBuildingFootprints(Height):
         return np.nan
 
     def timestamp(self) -> Iterable[datetime.datetime]:
-        return self.resource['date_bld_2'].reset_index(drop=True)
+        # TODO: No longer uses date_bld_2; too tired to piece together year and everything
+        # return self.resource['date_bld_2'].reset_index(drop=True)
+        return pd.NaT
 
     def start_date(self) -> Iterable[datetime.datetime]:
-        yield from (
-            pd.NaT if year == 0
-            else datetime.datetime(int(year), 1, 1)
-            for year in self.resource['year_built']
-        )
+        # yield from (
+        #     pd.NaT if year == 0
+        #     else datetime.datetime(int(year), 1, 1)
+        #     for year in self.resource['year_built']
+        # )
+        def gen():
+            for value in self.resource['year_built']:
+                try:
+                    v = int(value)
+                except (TypeError, ValueError):
+                    yield pd.NaT
+                else:
+                    if v == 0:
+                        yield pd.NaT
+                    else:
+                        try:
+                            yield datetime.datetime(v, 1, 1)
+                        except ValueError:
+                            yield pd.NaT
+
+        yield from gen()
+

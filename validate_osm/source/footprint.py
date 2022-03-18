@@ -1,3 +1,5 @@
+import logging
+import logging
 import functools
 import itertools
 from typing import Generator, Union, Collection, Optional
@@ -5,6 +7,7 @@ from typing import Hashable
 
 import geopandas as gpd
 import networkx
+import numpy as np
 import pandas as pd
 import shapely
 from annoy import AnnoyIndex
@@ -14,19 +17,12 @@ from shapely.geometry.base import BaseGeometry
 
 
 class CallableFootprint:
-    # def ini
-    # def __init__(self, compare: object):
-    #     from validate_osm.compare.compare import Compare
-    #     if not isinstance(compare, Compare):
-    #         raise TypeError(compare)
-    #     else:
-    #         self.compare = compare
-    #     self.footprints: Optional[GeoDataFrame] = None
 
     def __init__(self, data: GeoDataFrame):
         self.footprints = self._footprints(data)
 
     def _footprints(self, data: GeoDataFrame) -> GeoDataFrame:
+        logging.info(f'compiling {self.__class__.__name__} footprints')
         data = data[['geometry', 'centroid']].copy()
         data['geometry'] = data['geometry'].to_crs(3857)
         data['centroid'] = data['centroid'].to_crs(3857)
@@ -62,7 +58,7 @@ class CallableFootprint:
             'centroid': gpd.GeoSeries(centroid(), crs=data['centroid'].crs)
         })
 
-        # Second, aggrgeate the geometries where there is an overlap.
+        # Second, aggregate the geometries where there is an overlap.
         data['area'] = data.area
         data = data.sort_values(by='area', ascending=False)
         footprints = pd.Series(range(len(data)), index=data.index)
@@ -115,6 +111,7 @@ class CallableFootprint:
 
         footprints['geometry'] = footprints['geometry'].to_crs(3857)
         footprints['centroid'] = footprints['centroid'].to_crs(3857)
+        logging.info(f'{self.__class__.__name__} compiled {len(footprints)=} from {len(data)=}')
         return footprints
 
     def identity(self, gdf: GeoDataFrame) -> pd.Series:
@@ -135,8 +132,10 @@ class CallableFootprint:
         footprints = self.footprints
 
         def footprint() -> Generator[Hashable, None, None]:
+            # TODO: ValueError: Length of values (74709) does not match length of index (74999)
+            #   Therefore, there has been some missed matches (with n=5).
             for i, (c, a, g) in enumerate(data[['centroid', 'area', 'geometry']].values):
-                for n in self._annoy.get_nns_by_vector((c.x, c.y), 5):
+                for n in self._annoy.get_nns_by_vector((c.x, c.y), 10):
                     match = footprints.iloc[n]
                     geometry: BaseGeometry = match['geometry']
                     if not geometry.intersects(g):
@@ -145,6 +144,9 @@ class CallableFootprint:
                         continue
                     yield match.name
                     break
+                else:
+                    # TODO: Should we raise an exception if something hasn't been footprinted?
+                    yield np.nan
 
         index = pd.Series(footprint(), index=data.index, name=footprints.index.name)
         names = [footprints.index.name, *data.index.names]

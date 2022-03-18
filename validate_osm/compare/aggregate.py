@@ -1,5 +1,6 @@
 import functools
 import itertools
+import logging
 import os
 from pathlib import Path
 from typing import Iterator
@@ -23,13 +24,19 @@ class DescriptorAggregate:
         self._owner = owner
         if instance is None:
             return self
-
-        agg = self.cache.setdefault(instance, self._aggregate())
+        if instance in self.cache:
+            return self.cache[instance]
         path = self.path
-        if not path.exists() or self._instance.ignore_file:
+        if instance.ignore_file or not path.exists():
+            logging.info(f'building {owner}.data')
+            agg = self.cache[instance] = self._aggregate()
             if not path.parent.exists():
                 os.makedirs(path.parent)
+            logging.info(f'serializing {owner}.data to {path}')
             agg.to_feather(path)
+        else:
+            logging.info(f'reading {owner}.aggregate from {path}')
+            agg = self.cache[instance]
         return agg
 
     def _groups(self) -> Groups:

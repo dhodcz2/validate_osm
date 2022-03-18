@@ -1,6 +1,6 @@
 import dataclasses
 import inspect
-import warnings
+import logging
 from collections import UserDict
 from typing import Callable, Any, Iterator, Union
 from weakref import WeakKeyDictionary
@@ -32,8 +32,6 @@ class StructData:
         return self.name == other
 
     def __repr__(self):
-        # return f"{self.__class__.__name__}[{self.cls}" \
-        #        f"{('.' + self.func.__qualname__) if isinstance(self.func, Callable) else ''}]"
         return f"{self.__class__.__name__}[{self.name} from {self.cls}]"
 
     @property
@@ -58,10 +56,10 @@ class StructData:
             # Got a Series
             if isinstance(obj, Series):
                 if not isinstance(obj.index, pandas.core.indexes.range.RangeIndex):
-                    # warnings.warn(
-                    #     f"{obj}.index returns a {type(obj.index)}; naively passing this may result in a mismatched "
-                    #     f"column index. Resetting this index so that column indices align regardless of implementation."
-                    # )
+                    logging.debug(
+                        f"{obj}.index returns a {type(obj.index)}; naively passing this may result in a mismatched "
+                        f"column index. Resetting this index so that column indices align regardless of implementation."
+                    )
                     obj = obj.reset_index(drop=True)
                 if self.dtype is not None:
                     obj = obj.astype(self.dtype)
@@ -81,9 +79,6 @@ class _DecoratorData:
     args = ['self']
 
     def __call__(self, func: Callable) -> Callable:
-        # TODO: Not every class is pointing to the same dict; however, if _DecoratorData.__call__ is not called,
-        #   the class will inherit _data instead of having an independent _data. How do we fix this?
-
         argspec = inspect.getfullargspec(func)
         if argspec.args != self.args:
             raise SyntaxError(
@@ -221,12 +216,12 @@ class CacheData(UserDict):
     def __missing__(self, source: object) -> GeoDataFrame:
         from validate_osm.source.source import Source
         source: Source
-        data = self.data[source] = self.resolve(source)
+        data = self.data[source] = self._data(source)
         if 'group' not in self.data[source].index.names:
             raise ValueError(f"{source.group.__qualname__} has not assigned a group index")
         return data
 
-    def resolve(self, source: object):
+    def _data(self, source: object):
         from validate_osm.source.source import Source
         source: Source
         structs = self.structs[source.__class__]
@@ -269,76 +264,9 @@ class CacheData(UserDict):
                 # data[struct.name] = series.repeat(rows) if len(series) == 1 else series
             depend.difference_update(viable)
         data = source.group()
+        logging.debug(f'{source.__class__.__name__}.data done; deleting {source.resource.__class__.__name__}')
         del source.resource
         return data
-
-
-
-    # def __missing__(self, key):
-    #     self._instance = key
-    #     self._source = key.__class__
-    #     self._structs = self.cache[self._source]
-    #     data = self.resolve()
-    #     self.data[key] = data
-    #     return data
-    #
-    # @contextlib.contextmanager
-    # def subsource(self, subsource: object) -> None:
-    #     sources = self._instance.static
-    #     self._instance.static = subsource
-    #     yield
-    #     self._instance.static = sources
-    #
-    # def resolve(self) -> GeoDataFrame:
-    #     from validate_osm.source.source import Source
-    #     instance: Source = self._instance
-    #     self._source: Type[Source]
-    #     if isinstance(self._instance.static, Iterator):
-    #         sources: Iterator[GeoDataFrame] = (self.resolve_subsource(sub) for sub in instance.static)
-    #         data = concat(sources)
-    #     else:
-    #
-    #         data = self.resolve_subsource(instance.static)
-    #     data: GeoDataFrame = data.reset_index()
-    #     loc = ~data['geometry'].is_valid
-    #     data.loc[loc, 'geometry'] = data.loc[loc, 'geometry'].buffer(0)
-    #     # data = data.set_geometry('geometry')
-    #     return data
-    #
-    # def resolve_subsource(self, subsource: object) -> GeoDataFrame:
-    #     with self.subsource(subsource):
-    #         # Extract columns that do not have data dependencies
-    #         indie = {
-    #             name: struct.decorated_func(self._instance)
-    #             for name, struct in self._structs.items()
-    #             if not struct.dependent
-    #         }
-    #         rows = max(len(obj) for obj in indie.values())
-    #         data = GeoDataFrame({
-    #             name: (series.repeat(rows) if len(series) == 1 else series)
-    #             for name, series in indie.items()
-    #         })
-    #
-    #         # Extract data that is dependent on data that has been extracted.
-    #         self.data[self._instance] = data
-    #         depend: set[StructData] = {
-    #             struct
-    #             for struct in self._structs.values()
-    #             if struct.dependent
-    #         }
-    #         while depend:
-    #             viable: set[StructData] = {
-    #                 struct for struct in depend
-    #                 if not struct.dependent.difference(data.columns)  # If there is no dif, then all the req are avail
-    #             }
-    #             if not viable:
-    #                 raise RuntimeError(f"Cannot resolve with cross-dependencies: {depend}")
-    #             for struct in viable:
-    #                 series = struct.decorated_func(self._instance)
-    #                 data[struct.name] = series.repeat(rows) if len(series) == 1 else series
-    #             depend.difference_update(viable)
-    #
-    #     return data
 
 
 class DescriptorData(DescriptorPipeSerialize):
@@ -351,6 +279,7 @@ class DescriptorData(DescriptorPipeSerialize):
     _cache = CacheData()
 
     __get__: Union[GeoDataFrame, 'DescriptorData']
+    name = 'data'
 
     @property
     def validating(self) -> set[str]:

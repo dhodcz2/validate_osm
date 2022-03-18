@@ -1,18 +1,15 @@
 import functools
-from validate_osm.source.resource import Resource
-
-
-from networkx import Graph, connected_components
 import itertools
+from typing import Iterator, Type, Callable
 from weakref import WeakKeyDictionary
+
 import geopandas as gpd
-import networkx
 import numpy as np
 import pandas as pd
 import psutil
 from OSMPythonTools.overpass import OverpassResult, Overpass, Element
-from typing import Iterator, Generator, Type, Callable, Union
 
+from validate_osm.source.resource import Resource
 from validate_osm.source.source import Source
 
 
@@ -60,31 +57,30 @@ class DescriptorWays:
                 fragments.split()
             else:
                 query = self.source.query(fragments.pop(), type=self.type)
-                try:
-                    result: OverpassResult = self.overpass.query(query, timeout=300)
-                except Exception as e:
-                    if '504' in str(e):
-                        raise Exception(f"{str(e)}; try again later.") from e
-                    else:
-                        raise e
+                result: OverpassResult = self.overpass.query(query, timeout=300)
                 yield result
 
 
 class DescriptorRelations(DescriptorWays):
     type = 'relation'
 
-    def __get__(self, instance, owner) -> 'DescriptorRelations':
-        return super(DescriptorRelations, self).__get__(instance, owner)
+    __get__: 'DescriptorRelations'
 
     def __init__(self, *args, **kwargs):
         super(DescriptorWays, self).__init__(*args, **kwargs)
         self.groups = []
 
+    # TODO: How can we differentiate between groups that are incomplete because they are cut off by the bbox
+    #   versus groups that have members that were disqualified by the query?
+
     def __iter__(self) -> Iterator[OverpassResult]:
         self.groups = []
         for result in super(DescriptorRelations, self).__iter__():
             self.groups.extend(
-                [relation.typeIdShort(), *(member for member in relation.members())]
+                [
+                    relation.typeIdShort(),
+                    *(member.typeIdShort() for member in relation.members())
+                ]
                 for relation in result.elements()
             )
             yield result
@@ -179,14 +175,13 @@ class DescriptorEnumerative:
             for name, column in data.iteritems()
         })
 
+
 class DynamicOverpassResource(Resource):
     ways = DescriptorWays()
     relations = DescriptorRelations()
     enumerative = DescriptorEnumerative()
-
-    # TODO: Instead of fumbling with dependent_relations, dependent_ways, and then assigning
-    #   relation to way entries, let's only use one column: id; w/123, r/123, etc. and then
-    #   connected components the strings
+    name = 'osm'
+    link = 'https://www.openstreetmap.org'
 
     def __get__(self, instance: Source, owner: Type[Source]):
         self.source = instance
@@ -198,3 +193,6 @@ class DynamicOverpassResource(Resource):
             yield from result.elements()
         for result in self.relations:
             yield from result.elements()
+
+    def __delete__(self, instance):
+        pass

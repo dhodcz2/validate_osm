@@ -1,4 +1,5 @@
 from weakref import WeakKeyDictionary
+import logging
 from geopandas import GeoDataFrame
 import time
 import abc
@@ -39,37 +40,36 @@ class File:
 def empty_dir(path: Path) -> bool:
     return True if next(path.iterdir(), None) is None else False
 
+#
+# def get(self) -> None:
+#     logging.info(f'fetching {self}')
+#     response = requests.get(self.url, stream=True)
+#     response.raise_for_status()
+#     if 'Content-Disposition' in response.headers.keys():
+#         filename = re.findall('filename=(.+)', response.headers['Content-Disposition'])[0]
+#     else:
+#         url: str = self.url
+#         filename = url.rpartition('/')
+#     path: Path = self.path
+#     path /= filename
+#     with open(path, 'wb') as file:
+#         for block in response.iter_content(1024):
+#             file.write(block)
+#     if self.unzipped:
+#         raise NotImplementedError
+#         # shutil.unpack_archive()
 
-def get(self) -> None:
-    print('fetching...', end=' ')
-    response = requests.get(self.url, stream=True)
-    response.raise_for_status()
-    if 'Content-Disposition' in response.headers.keys():
-        filename = re.findall('filename=(.+)', response.headers['Content-Disposition'])[0]
-    else:
-        url: str = self.url
-        filename = url.rpartition('/')
-    path: Path = self.path
-    path /= filename
-    with open(path, 'wb') as file:
-        for block in response.iter_content(1024):
-            file.write(block)
-    print('done!')
-    if self.unzipped:
-        raise NotImplementedError
-        # shutil.unpack_archive()
 
-
-def download(session: requests.Session, file: File) -> None:
+def get(session: requests.Session, file: File) -> None:
     response = session.get(file.url, stream=True)
     response.raise_for_status()
-    print(f'\t{file.name}')
-    print(f'\t{response.status_code}')
+    logging.debug(f'\t{file.name}')
+    logging.debug(f'\t{response.status_code}')
     with open(file.path, 'wb') as f:
         for chunk in response.iter_content(chunk_size=1024):
             if chunk:
                 f.write(chunk)
-    print(f'\tdone')
+    logging.debug(f'\tdone')
 
 
 class Resource(abc.ABC):
@@ -117,9 +117,8 @@ class StaticBase(Resource):
         # TODO: Why is file.path different than file.name?
         gdf: Union[GeoDataFrame, pd.DataFrame]
         t = time.time()
-        print(f'reading {file.path.name}')
+        logging.info(f'reading {file.path}')
         match file.path.name.rpartition('.')[2]:
-            # TODO: Try to laod with geopandas if possible so that bbox can reduce memory load
             case 'feather':
                 try:
                     gdf = gpd.read_feather(file.path)
@@ -143,7 +142,7 @@ class StaticBase(Resource):
                     gdf = gpd.read_file(file.path, rows=100 if debug else None, bbox=bbox)
                 except (AttributeError, TypeError) as e:
                     raise NotImplementedError from e
-        print(f'{file.name} took {(time.time() - t) / 60} minutes to load.')
+        logging.info(f'{file.name} took {(time.time() - t) / 60} minutes to load.')
         return gdf
 
     @classmethod
@@ -163,23 +162,18 @@ class StaticBase(Resource):
             for file in download:
                 if not file.path.parent.exists():
                     os.makedirs(file.path.parent)
-            msg = (
-                    'fetching\n\t' +
-                    '\n\t'.join(file.name for file in download) +
-                    '...'
-            )
-            print(msg)
+            names = ', '.join(file.name for file in download) + '...'
+            logging.info(f"fetching {names}")
             with requests.Session() as session, \
                     concurrent.futures.ThreadPoolExecutor() as te:
                 future_url_request = [
-                    te.submit(download, session, file)
+                    te.submit(get, session, file)
                     for file in download
                 ]
-                print('downloading')
                 processes = []
                 for future in concurrent.futures.as_completed(future_url_request):
                     processes.append(future.result())
-                print('done!')
+                logging.info('done fetching')
 
         if preprocess:
             preprocess = [
@@ -188,16 +182,15 @@ class StaticBase(Resource):
             ]
             preprocessing = [(file, path) for file, path in preprocess if not path.exists()]
             if preprocessing:
-                paths = [path.name for file, path in preprocessing]
-                warnings.warn(f'Preprecessing {paths}; this may take a while.')
+                paths = [path for file, path in preprocessing]
+                logging.warning(f'Preprecessing {paths}; this may take a while.')
                 # TODO: Note: Illinois.geojson.zip is 1.35 GB, but expands in memory to about 5 GB
                 for file, path in preprocessing:
-                    t = time.time()
                     gdf = cls._from_file(file)
-                    print(f'{file.name} took {(time.time() - t) / 60} minutes to load.')
                     t = time.time()
+                    logging.info(f'serializing {file.path}')
                     gdf.to_feather(path)
-                    print(f'{path.name} to {(time.time() - t) / 60} minutes to serialize.')
+                    logging.info(f'{path.name} to {(time.time() - t) / 60} minutes to serialize.')
 
             for file, path in preprocess:
                 file.path = path
@@ -207,6 +200,7 @@ class StaticBase(Resource):
             for file in files
         )
         if len(files) > 1:
+            logging.info(f"concatenating GeoDataFrame from {', '.join(file.name for file in files)}")
             result = concat(dfs)
         else:
             result = next(dfs)
@@ -249,6 +243,8 @@ class StaticNaive(StaticBase):
             self,
             files: Union[File, Collection[File]],
             crs: Any,
+            name: str,
+            link: str,
             flipped=False,
             unzipped=None,
             preprocess: bool = True,
@@ -268,6 +264,8 @@ class StaticNaive(StaticBase):
         self.columns = columns
         self._cache = None
         self.preprocess = preprocess
+        self.name=name
+        self.link=link
 
     def __get__(self, instance, owner):
         from validate_osm.source import Source
@@ -284,7 +282,7 @@ class StaticNaive(StaticBase):
         return cls._from_files(cls.files)
 
     def __delete__(self, instance):
-        del self._cache
+        self._cache = None
 
 
 class StaticRegional(StaticBase, abc.ABC):

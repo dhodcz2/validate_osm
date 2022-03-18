@@ -15,30 +15,38 @@ chicago = BBox([41.83099018739837, -87.66603456346172, 41.90990199281114, -87.59
 
 CompareChicago: Type[Compare] = partial(
     Compare,
+    chicago,
     HeightOSM, HeightChicagoBuildingFootprints, SourceMSBuildingFootprints,
-    bbox=chicago
+    verbose=True,
+    # debug=True works and contains more detailed information
 )
 
 CompareUIC: Type[Compare] = partial(
     Compare,
+    uic,
     # HeightOSM, HeightChicagoBuildingFootprints, SourceMSBuildingFootprints,
     HeightOSM, SourceMSBuildingFootprints,
-    bbox=uic
+    verbose=True,
 )
 
 CompareRio: Type[Compare] = partial(
-
     Compare,
+    rio,
     HeightOSM, SourceMSBuildingFootprints,
-    bbox=rio
+    verbose=True
 )
 
-# TODO: In compare.data, add
+# TODO: logger.debug for processes; logger.info for things that may take time.
+# TODO: Check that we are loading .feather and not .geojson in this output. Perhaps add an attribute to dataclass:
+"""
+2022-03-18 03:09:09,059 - INFO - Building Footprints (current).geojson took 5.217855310440063 minutes to load.
+2022-03-18 03:09:09,059 - INFO - serializing /home/arstneio/PycharmProjects/ValidateOSM/validate_osm/source/static/StaticNaive/Building Footprints (current).geojson
+2022-03-18 03:09:17,296 - INFO - Building Footprints (current).feather to 0.1372891624768575 minutes to serialize.
+2022-03-18 03:09:17,297 - INFO - reading Building Footprints (current).feather
+2022-03-18 03:09:24,854 - INFO - Building Footprints (current).geojson took 0.1259451150894165 minutes to load."""
+
 if __name__ == '__main__':
-    # compare = CompareUIC(ignore_file=True)
-    # compare.data
-    # compare.aggregate
-    # ...
     compare = CompareChicago(ignore_file=True)
     compare.data
     compare.aggregate
+    print()
