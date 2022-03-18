@@ -9,9 +9,9 @@ import geopandas as gpd
 import pandas as pd
 from geopandas import GeoDataFrame
 
-from validateosm.source.aggregate import AggregateFactory
-from validateosm.source.groups import Groups
-from validateosm.source.source import Source
+from validate_osm.source.aggregate import AggregateFactory
+from validate_osm.source.groups import Groups
+from validate_osm.source.source import Source
 from weakref import WeakKeyDictionary
 
 
@@ -68,6 +68,8 @@ class DescriptorAggregate:
                 raise ValueError(f"{source.__class__.__name__}.factory!={other_source.__class__.name}.factory")
         result = factory(groups)
         result['iloc'] = range(len(result))
+        result['geometry'] = result['geometry'].to_crs(3857)
+        result['centroid'] = result['centroid'].to_crs(3857)
         return result
 
     def __delete__(self, instance):
@@ -76,7 +78,7 @@ class DescriptorAggregate:
 
     @property
     def path(self) -> Path:
-        from validateosm.compare.compare import Compare
+        from validate_osm.compare.compare import Compare
         self._instance: Compare
         # return self._instance.directory / (self.__class__.__name__ + '.feather')
         return (

@@ -12,7 +12,7 @@ import pandas as pd
 from geopandas import GeoDataFrame
 from networkx.algorithms.components.connected import connected_components
 
-from validateosm.source.pipe import DescriptorPipe
+from validate_osm.source.pipe import DescriptorPipe
 
 
 @dataclasses.dataclass
@@ -164,7 +164,7 @@ class CacheStructs(UserDict):
         self.data: WeakKeyDictionary[type, set[StructGroup]] = WeakKeyDictionary()
 
     def __missing__(self, source: type):
-        from validateosm.source import Source
+        from validate_osm.source import Source
         structs: set[StructGroup] = {
             struct
             for c in source.mro()[::-1]
@@ -187,7 +187,7 @@ class CacheGroups(UserDict):
         self.structs: CacheStructs[type, set[StructGroup]] = CacheStructs()
 
     def __missing__(self, source: object) -> Groups:
-        from validateosm.source import Source
+        from validate_osm.source import Source
         source: Source
         structs = self.structs[source.__class__]
         groups = (

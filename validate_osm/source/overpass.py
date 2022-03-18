@@ -1,4 +1,6 @@
 import functools
+from validate_osm.source.resource import Resource
+
 
 from networkx import Graph, connected_components
 import itertools
@@ -11,7 +13,7 @@ import psutil
 from OSMPythonTools.overpass import OverpassResult, Overpass, Element
 from typing import Iterator, Generator, Type, Callable, Union
 
-from validateosm.source.source import Source
+from validate_osm.source.source import Source
 
 
 class FragmentBBox:
@@ -47,18 +49,24 @@ class DescriptorWays:
         return self
 
     def __iter__(self) -> Iterator[OverpassResult]:
-        from validateosm.source.source_osm import SourceOSM
+        from validate_osm.source.source_osm import SourceOSM
         self.source: SourceOSM
         fragments = FragmentBBox(self.source.bbox.data.ellipsoidal.bounds)
         while fragments:
             peak = fragments.peak()
             query = self.source.query(peak, type=self.type, appendix='out count;')
-            estimate = self.overpass.query(query).countElements() * self.ESTIMATE_COST_PER_ENTRY_B
+            estimate = self.overpass.query(query, timeout=120).countElements() * self.ESTIMATE_COST_PER_ENTRY_B
             if estimate > psutil.virtual_memory().free:
                 fragments.split()
             else:
                 query = self.source.query(fragments.pop(), type=self.type)
-                result: OverpassResult = self.overpass.query(query)
+                try:
+                    result: OverpassResult = self.overpass.query(query, timeout=300)
+                except Exception as e:
+                    if '504' in str(e):
+                        raise Exception(f"{str(e)}; try again later.") from e
+                    else:
+                        raise e
                 yield result
 
 
@@ -97,7 +105,7 @@ class DecoratorEnumerative:
 
     def __call__(self, func: Callable):
         # TODO: How do I use typeid instead of integer index as the key
-        from validateosm.source.source_osm import SourceOSM
+        from validate_osm.source.source_osm import SourceOSM
         @functools.wraps(func)
         def wrapper(source: SourceOSM):
             cache = self.cache.setdefault(source, {})
@@ -171,8 +179,7 @@ class DescriptorEnumerative:
             for name, column in data.iteritems()
         })
 
-
-class DynamicOverpassResource:
+class DynamicOverpassResource(Resource):
     ways = DescriptorWays()
     relations = DescriptorRelations()
     enumerative = DescriptorEnumerative()

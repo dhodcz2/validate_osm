@@ -16,7 +16,7 @@ from shapely.geometry.base import BaseGeometry
 class CallableFootprint:
     # def ini
     # def __init__(self, compare: object):
-    #     from validateosm.compare.compare import Compare
+    #     from validate_osm.compare.compare import Compare
     #     if not isinstance(compare, Compare):
     #         raise TypeError(compare)
     #     else:

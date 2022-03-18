@@ -13,15 +13,10 @@ import shapely.geometry.base
 import shapely.ops
 from geopandas import GeoSeries, GeoDataFrame
 
-# TODO If self.bbox is not self.__class__.bbox
-from validateosm.source.aggregate import AggregateFactory
-from validateosm.source.data import DecoratorData, DescriptorData
-from validateosm.source.footprint import CallableFootprint
-from validateosm.source.groups import (
-    DescriptorGroup,
-    Groups
-)
-from validateosm.source.static import StaticBase
+from validate_osm.source.aggregate import AggregateFactory
+from validate_osm.source.data import DecoratorData, DescriptorData
+from validate_osm.source.footprint import CallableFootprint
+from validate_osm.source.resource import StaticBase
 
 warnings.filterwarnings('ignore', message='.*initial implementation of Parquet.*')
 
@@ -97,6 +92,7 @@ class BBox:
     #         return self._cache_static[self._owner]
     #
 
+
 class SourceMeta(abc.ABCMeta, type):
     def __new__(cls, name, bases, local):
         object = super(SourceMeta, cls).__new__(cls, name, bases, local)
@@ -132,6 +128,17 @@ class Source(abc.ABC, metaclass=SourceMeta):
     link: str
     bbox: BBox
     resource: Union[StaticBase, pd.DataFrame, gpd.GeoDataFrame]
+    ignore_file = False
+
+    @classmethod
+    @property
+    def name(cls) -> str:
+        return cls.resource.name
+
+    @classmethod
+    @property
+    def link(cls) -> str:
+        return cls.resource.link
 
     def group(self) -> GeoDataFrame:
         """
@@ -148,21 +155,6 @@ class Source(abc.ABC, metaclass=SourceMeta):
 
     def exclude(self) -> Optional[numpy.typing.NDArray[bool]]:
         """ Iterates across Source.aggregate and yields True if entry is to be excluded from Source.batch """
-
-    def name(cls) -> str:
-        """A short, abbreviated name that may be used for quickly selecting a specific source."""
-
-    name = classmethod(property(abc.abstractmethod(name)))
-
-    def link(cls) -> str:
-        """A link to the page for further data regarding the Source"""
-
-    link = classmethod(property(abc.abstractmethod(link)))
-
-    def bbox(cls) -> BBox:
-        """A BBox which represents the bounds of which relevant data from the Source is extracted."""
-
-    bbox = classmethod(property(abc.abstractmethod(bbox)))
 
     @classmethod
     @property

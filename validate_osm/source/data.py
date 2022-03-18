@@ -11,7 +11,7 @@ from geopandas import GeoSeries
 from pandas import Series
 from pandas.core.indexes.range import RangeIndex
 
-from validateosm.source.pipe import DescriptorPipeSerialize
+from validate_osm.source.pipe import DescriptorPipeSerialize
 
 
 @dataclasses.dataclass
@@ -58,10 +58,10 @@ class StructData:
             # Got a Series
             if isinstance(obj, Series):
                 if not isinstance(obj.index, pandas.core.indexes.range.RangeIndex):
-                    warnings.warn(
-                        f"{obj}.index returns a {type(obj.index)}; naively passing this may result in a mismatched "
-                        f"column index. Resetting this index so that column indices align regardless of implementation."
-                    )
+                    # warnings.warn(
+                    #     f"{obj}.index returns a {type(obj.index)}; naively passing this may result in a mismatched "
+                    #     f"column index. Resetting this index so that column indices align regardless of implementation."
+                    # )
                     obj = obj.reset_index(drop=True)
                 if self.dtype is not None:
                     obj = obj.astype(self.dtype)
@@ -130,7 +130,7 @@ class CacheStructs(UserDict):
     data: dict[type, dict[str, StructData]]
 
     def __missing__(self, source: type) -> dict[str, StructData]:
-        from validateosm.source.source import Source
+        from validate_osm.source.source import Source
         sources = [
             s for s in source.mro()[:0:-1]
             if issubclass(s, Source)
@@ -171,7 +171,6 @@ class CacheStructs(UserDict):
             crs = struct.crs
             dependent = struct.dependent
 
-
             if name in source.__dict__:
                 func = getattr(source, name)
                 abstract = getattr(func, '__isabstractmethod__', False)
@@ -192,8 +191,6 @@ class CacheStructs(UserDict):
             #     ...
             # if source.__name__ == 'HeightOSM':
             #     ...
-
-
 
             return StructData(
                 name=name,
@@ -222,15 +219,16 @@ class CacheData(UserDict):
         self.data: WeakKeyDictionary[object, GeoDataFrame] = WeakKeyDictionary()
 
     def __missing__(self, source: object) -> GeoDataFrame:
-        from validateosm.source.source import Source
+        from validate_osm.source.source import Source
         source: Source
         data = self.data[source] = self.resolve(source)
         if 'group' not in self.data[source].index.names:
             raise ValueError(f"{source.group.__qualname__} has not assigned a group index")
-        print(f'{source.__class__.__name__}.data')
         return data
 
     def resolve(self, source: object):
+        from validate_osm.source.source import Source
+        source: Source
         structs = self.structs[source.__class__]
         indie = {
             name: struct.decorated_func(source)
@@ -271,7 +269,10 @@ class CacheData(UserDict):
                 # data[struct.name] = series.repeat(rows) if len(series) == 1 else series
             depend.difference_update(viable)
         data = source.group()
+        del source.resource
         return data
+
+
 
     # def __missing__(self, key):
     #     self._instance = key
@@ -289,7 +290,7 @@ class CacheData(UserDict):
     #     self._instance.static = sources
     #
     # def resolve(self) -> GeoDataFrame:
-    #     from validateosm.source.source import Source
+    #     from validate_osm.source.source import Source
     #     instance: Source = self._instance
     #     self._source: Type[Source]
     #     if isinstance(self._instance.static, Iterator):

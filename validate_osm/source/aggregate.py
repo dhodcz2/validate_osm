@@ -2,7 +2,7 @@ from typing import Callable
 
 from geopandas import GeoDataFrame, GeoSeries
 
-from validateosm.source.groups import Groups
+from validate_osm.source.groups import Groups
 
 
 class AggregateFactory:

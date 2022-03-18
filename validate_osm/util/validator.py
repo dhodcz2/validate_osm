@@ -4,11 +4,11 @@ from typing import Type, Union, Iterable
 import pandas as pd
 from geopandas import GeoDataFrame
 
-from validateosm.sources import Needles, Haystack
-from validateosm.abstracter.apply import Apply
-from validateosm.abstracter.combine import Abstracter
-from validateosm.util.plot import plot_groupings
-from validateosm.compare import Compare
+from validate_osm.sources import Needles, Haystack
+from validate_osm.abstracter.apply import Apply
+from validate_osm.abstracter.combine import Abstracter
+from validate_osm.util.plot import plot_groupings
+from validate_osm.compare import Compare
 
 
 class Validator:
@@ -115,7 +115,7 @@ class Validator:
         ), index=matches.index)
 
         print(matches['percent_error'].median())
-        from validateosm.util.plot import plot_discrepancies
+        from validate_osm.util.plot import plot_discrepancies
         return plot_discrepancies(matches, 'percent_error')
 
 

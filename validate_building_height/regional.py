@@ -12,8 +12,7 @@ from botocore import UNSIGNED
 from botocore.client import Config
 from botocore.handlers import disable_signing
 from shapely.geometry import Polygon
-
-from validateosm.source.static import StaticRegional, File
+from validate_osm.source.resource import StaticRegional, File
 
 
 # TODO: How do we query for bbox with large, regionally defined datasets?
@@ -21,6 +20,8 @@ from validateosm.source.static import StaticRegional, File
 class MSBuildingFootprints(StaticRegional):
     crs = 'epsg:4326'
     columns = 'geometry'
+    name = 'msbf'
+    link = ''
 
     class RegionSouthAmerica(StaticRegional.Region):
         menu = {'Argentina', 'Bolivia', 'Brazil', 'Chile', 'Colombia', 'Ecuador', 'Guyana', 'Paraguay',
@@ -54,7 +55,6 @@ class MSBuildingFootprints(StaticRegional):
             return gdf
 
         def __getitem__(self, item: Iterable) -> Generator[File, None, None]:
-
             # unpack = iter(item)
             # country = next(unpack)
             # states: Union[str, Iterable[str]] = next(unpack, None)
@@ -131,9 +131,10 @@ class MSBuildingFootprints(StaticRegional):
                 yield from self._menu[country][item]
 
 
-class OpenCityDataStatic(StaticRegional):
+class OpenCityData(StaticRegional):
     crs = 'epsg:4979'
-    warnings.warn('OCM buildings are compiled from MSBuildingFootprints and OpenStreetMaps')
+    name = 'ocd'
+    link = ''
 
     class RegionUS(StaticRegional.Region):
         menu = {"Alaska", "Alabama", "Arkansas", "Arizona", "California", "Colorado",
@@ -169,7 +170,7 @@ class OpenCityDataStatic(StaticRegional):
                 yield from (
                     File(
                         url=f'https://opencitymodel.s3.amazonaws.com/{obj.key}',
-                        directory=OpenCityDataStatic.directory / state /
+                        directory=OpenCityData.directory / state /
                                   re.search(r'^.*\/county=([^\/]*).*$', obj.key)[1]
                     )
                     for obj in bucket.objects.filter(Prefix=f'2019-jun/parquet/state={state}/')
@@ -179,7 +180,7 @@ class OpenCityDataStatic(StaticRegional):
                 yield from (
                     File(
                         url=f'https://opencitymodel.s3.amazonaws.com/{obj.key}',
-                        directory=OpenCityDataStatic.directory / state / county
+                        directory=OpenCityData.directory / state / county
                     )
                     for obj in bucket.objects.filter(Prefix=f'2019-jun/parquet/state={state}/county={county}'))
             elif isinstance(counties, Iterable):
@@ -187,7 +188,7 @@ class OpenCityDataStatic(StaticRegional):
                 yield from (
                     File(
                         url=f'https://opencitymodel.s3.amazonaws.com/{obj.key}',
-                        directory=OpenCityDataStatic.directory / state / county
+                        directory=OpenCityData.directory / state / county
                     )
                     for county in counties
                     for obj in bucket.objects.filter(Prefix=f'2019-jun/parquet/state={state}/county={county}')
@@ -198,8 +199,9 @@ class OpenCityDataStatic(StaticRegional):
     regions = (RegionUS(),)
 
     def __get__(self, instance, owner):
-        # TODO: Keep track of which files are being downloaded. Once downloaded, I must postprocess them
-        #   and convert the ['fp'] column from string to Polygon. Then I save these files.
+        # TODO: Keep track of which file are being downloaded. Once downloaded, I must postprocess them
+        #   and convert the ['fp'] column from string to Polygon. Then I save these file.
+        warnings.warn('OCM buildings are compiled from MSBuildingFootprints and OpenStreetMaps')
         raise NotImplementedError
 
     @functools.cached_property

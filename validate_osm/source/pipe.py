@@ -17,7 +17,7 @@ class DescriptorPipe:
     def __get__(self, instance, owner):
         if instance in self._cache:
             return self._cache[instance]
-        from validateosm.source import Source
+        from validate_osm.source import Source
         self._instance: Source = instance
         self._owner: Type[Source] = owner
         if instance is None:
@@ -39,7 +39,7 @@ class DescriptorPipeSerialize(DescriptorPipe, abc.ABC):
 
     def __get__(self, instance, owner):
         # TODO: Never use self._instance from __get__; in the debugger it causes weirdness
-        # from validateosm.source import Source
+        # from validate_osm.source import Source
         # self._instance: Source = instance
         # self._owner: Type[Source] = owner
         # if instance is not None and instance not in self._cache:
@@ -52,7 +52,7 @@ class DescriptorPipeSerialize(DescriptorPipe, abc.ABC):
         #         self._cache[instance].to_feather(path)
         #     return self._cache[instance]
         # return super(DescriptorPipeSerialize, self).__get__(instance, owner)
-        from validateosm.source import Source
+        from validate_osm.source import Source
         instance: Union[Source, object]
         owner: Type[Source]
         self._instance = instance
@@ -75,7 +75,7 @@ class DescriptorPipeSerialize(DescriptorPipe, abc.ABC):
     def path(self) -> Path:
         return (
                 Path(inspect.getfile(self._owner)).parent /
-                'resources' /
+                'file' /
                 self._owner.__name__ /
                 self.__class__.__name__ /
                 f'{str(self._instance.bbox)}.feather'

@@ -1,3 +1,5 @@
+from weakref import WeakKeyDictionary
+from geopandas import GeoDataFrame
 import time
 import abc
 import concurrent.futures
@@ -17,16 +19,14 @@ import requests
 import shapely.geometry
 from shapely.geometry import Polygon
 
-from validateosm.args import global_args as project_args
-from validateosm.util.scripts import concat
+from validate_osm.args import global_args as project_args
+from validate_osm.util.scripts import concat
 
 
 @dataclasses.dataclass(repr=False)
 class File:
-    path: Union[str, Path] = dataclasses.field(repr=False)
+    path: Union[str, Path, None] = dataclasses.field(repr=False)
     url: Optional[str] = dataclasses.field(repr=False, default=None)
-
-    # columns: Union[None, list[str], str] = dataclasses.field(repr=False, default=None)
 
     def __post_init__(self):
         self.path = Path(self.path)
@@ -72,7 +72,12 @@ def download(session: requests.Session, file: File) -> None:
     print(f'\tdone')
 
 
-class StaticBase(abc.ABC):
+class Resource(abc.ABC):
+    name: str
+    link: str
+
+
+class StaticBase(Resource):
     crs: Any
     flipped: bool = False
     project_args = project_args
@@ -89,15 +94,17 @@ class StaticBase(abc.ABC):
     flipped = classmethod(property(abc.abstractmethod(flipped)))
 
     @abc.abstractmethod
-    def __get__(self, instance, owner) -> gpd.GeoDataFrame:
+    def __get__(self, instance, owner) -> GeoDataFrame:
         ...
 
-    directory: Path = dataclasses.field(init=False, repr=False)
+    @abc.abstractmethod
+    def __delete__(self, instance):
+        ...
 
+    @classmethod
+    @property
     def directory(cls) -> Path:
         return Path(inspect.getfile(cls)).parent / 'static' / cls.__name__
-
-    directory = classmethod(property(directory))
 
     @classmethod
     def _from_file(
@@ -106,9 +113,9 @@ class StaticBase(abc.ABC):
             bbox: Optional[shapely.geometry.Polygon] = None,
             debug=False
             # columns: Optional[list[str]] = None
-    ) -> Union[pd.DataFrame, gpd.GeoDataFrame]:
+    ) -> Union[pd.DataFrame, GeoDataFrame]:
         # TODO: Why is file.path different than file.name?
-        gdf: Union[gpd.GeoDataFrame, pd.DataFrame]
+        gdf: Union[GeoDataFrame, pd.DataFrame]
         t = time.time()
         print(f'reading {file.path.name}')
         match file.path.name.rpartition('.')[2]:
@@ -118,7 +125,7 @@ class StaticBase(abc.ABC):
                     gdf = gpd.read_feather(file.path)
                 except (AttributeError, TypeError):
                     gdf = pd.read_feather(file.path, )
-                if isinstance(gdf, gpd.GeoDataFrame) and bbox is not None:
+                if isinstance(gdf, GeoDataFrame) and bbox is not None:
                     gdf = gdf[gdf.within(bbox)]
                 if debug:
                     gdf = gdf.head(100)
@@ -127,7 +134,7 @@ class StaticBase(abc.ABC):
                     gdf = gpd.read_parquet(file.path, )
                 except (AttributeError, TypeError):
                     gdf = pd.read_parquet(file.path, )
-                if isinstance(gdf, gpd.GeoDataFrame) and bbox is not None:
+                if isinstance(gdf, GeoDataFrame) and bbox is not None:
                     gdf = gdf[gdf.within(bbox)]
                 if debug:
                     gdf = gdf.head(100)
@@ -146,7 +153,7 @@ class StaticBase(abc.ABC):
             bbox: Optional[shapely.geometry.Polygon] = None,
             columns: Optional[list[str]] = None,
             preprocess: bool = True
-    ) -> Union[pd.DataFrame, gpd.GeoDataFrame]:
+    ) -> Union[pd.DataFrame, GeoDataFrame]:
         download = [
             file for file in files
             if not file.path.exists()
@@ -187,15 +194,15 @@ class StaticBase(abc.ABC):
                 for file, path in preprocessing:
                     t = time.time()
                     gdf = cls._from_file(file)
-                    print(f'{file.name} took {(time.time() - t)/60} minutes to load.')
+                    print(f'{file.name} took {(time.time() - t) / 60} minutes to load.')
                     t = time.time()
                     gdf.to_feather(path)
-                    print(f'{path.name} to {(time.time() - t)/60} minutes to serialize.')
+                    print(f'{path.name} to {(time.time() - t) / 60} minutes to serialize.')
 
             for file, path in preprocess:
                 file.path = path
 
-        dfs: Union[Iterator[gpd.GeoDataFrame], Iterator[pd.DataFrame]] = (
+        dfs: Union[Iterator[GeoDataFrame], Iterator[pd.DataFrame]] = (
             cls._from_file(file, bbox, columns)
             for file in files
         )
@@ -204,7 +211,7 @@ class StaticBase(abc.ABC):
         else:
             result = next(dfs)
             try:
-                result = gpd.GeoDataFrame(result)
+                result = GeoDataFrame(result)
             except Exception as e:
                 raise NotImplementedError(str(e)) from e
             # TODO: If the dataset is in a different crs, where is the most scalable location
@@ -213,7 +220,7 @@ class StaticBase(abc.ABC):
 
     @classmethod
     @abc.abstractmethod
-    def from_files(cls) -> gpd.GeoDataFrame:
+    def from_files(cls) -> GeoDataFrame:
         ...
 
     def __iter__(self) -> Iterator:
@@ -233,6 +240,9 @@ class StaticBase(abc.ABC):
 
 
 class StaticNaive(StaticBase):
+    """
+    Naively load all the files. No caching based on instance
+    """
     files: list[File]
 
     def __init__(
@@ -260,7 +270,7 @@ class StaticNaive(StaticBase):
         self.preprocess = preprocess
 
     def __get__(self, instance, owner):
-        from validateosm.source import Source
+        from validate_osm.source import Source
         self._owner: Source = owner
         self._instance: Type[Source] = instance
         if self._instance is None:
@@ -270,8 +280,11 @@ class StaticNaive(StaticBase):
         return self._cache
 
     @classmethod
-    def from_files(cls) -> gpd.GeoDataFrame:
+    def from_files(cls) -> GeoDataFrame:
         return cls._from_files(cls.files)
+
+    def __delete__(self, instance):
+        del self._cache
 
 
 class StaticRegional(StaticBase, abc.ABC):
@@ -297,11 +310,6 @@ class StaticRegional(StaticBase, abc.ABC):
     def regions(self) -> Iterable['StaticRegional.Region']:
         ...
 
-    @property
-    @abc.abstractmethod
-    def columns(self) -> Union[None, list[str], str]:
-        ...
-
     @functools.cached_property
     def _menu(self) -> dict[str, Region]:
         return {
@@ -314,7 +322,7 @@ class StaticRegional(StaticBase, abc.ABC):
     def menu(self) -> set[str]:
         return set(self._menu.keys())
 
-    def __getitem__(self, items: Union[str, Polygon, list, tuple]) -> gpd.GeoDataFrame:
+    def __getitem__(self, items: Union[str, Polygon, list, tuple]) -> GeoDataFrame:
         if not isinstance(items, tuple):
             items = (items,)
 
@@ -338,13 +346,22 @@ class StaticRegional(StaticBase, abc.ABC):
         files = list(gen())
         return self._from_files(files, bbox=self.bbox)
 
-    def __get__(self, instance, owner) -> gpd.GeoDataFrame:
-        from validateosm.source import Source
+    def __init__(self):
+        self.cache: WeakKeyDictionary[object, GeoDataFrame] = WeakKeyDictionary()
+
+    def __get__(self, instance, owner) -> Union[GeoDataFrame, 'StaticRegional']:
         self._instance = instance
-        self._owner: Type[Source] = owner
+        self._owner = owner
         if instance is None:
             return self
-        return self[self.bbox]
+        if instance in self.cache:
+            return self.cache[instance]
+        else:
+            cache = self.cache[instance] = self[self.bbox]
+            return cache
+
+    def __delete__(self, instance):
+        del self.cache[instance]
 
     def __contains__(self, item: Union[str, Polygon]):
         match item:
@@ -359,5 +376,5 @@ class StaticRegional(StaticBase, abc.ABC):
             case _:
                 raise TypeError(item)
 
-    def from_files(cls) -> gpd.GeoDataFrame:
+    def from_files(cls) -> GeoDataFrame:
         raise NotImplementedError

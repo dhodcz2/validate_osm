@@ -25,7 +25,7 @@ import pandas as pd
 from typing import Type
 from pandas import DataFrame, Series
 import geopandas as gpd
-from validateosm.source.source import Source
+from validate_osm.source.source import Source
 
 
 class Where:

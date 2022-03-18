@@ -6,7 +6,7 @@ from typing import Type, Iterator
 import pandas as pd
 from pandas import IndexSlice as idx
 
-from validateosm.sources import Source, Haystack, Needles
+# from validate_osm.sources import Source, Haystack, Needles
 
 
 # TODO: Rename name to abbreviation

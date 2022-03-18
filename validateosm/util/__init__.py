@@ -1,1 +1,0 @@
-from validateosm.util.scripts import concat

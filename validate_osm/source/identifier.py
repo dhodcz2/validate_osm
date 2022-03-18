@@ -5,7 +5,7 @@
 # import pandas as pd
 # import inspect
 #
-# from validateosm.source.data import StructData
+# from validate_osm.source.data import StructData
 #
 #
 # @dataclasses.dataclass
@@ -62,7 +62,7 @@
 #         return self
 #
 #     def __call__(self, gdf: gpd.GeoDataFrame) -> pd.Series:
-#         from validateosm.source.source import Source
+#         from validate_osm.source.source import Source
 #         try:
 #             # If an identifier has been defined, return its result.
 #             struct: StructIdentifier = next(

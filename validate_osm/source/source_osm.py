@@ -20,13 +20,13 @@ from geopandas import GeoDataFrame, GeoSeries
 from pandas import Series
 from shapely.geometry import Polygon
 
-from validateosm.source.data import CacheData
-from validateosm.source.groups import (
+from validate_osm.source.data import CacheData
+from validate_osm.source.groups import (
     DecoratorGroup
 )
-from validateosm.source.source import DescriptorData
-from validateosm.source.source import Source
-from validateosm.source.overpass import DynamicOverpassResource
+from validate_osm.source.source import DescriptorData
+from validate_osm.source.source import Source
+from validate_osm.source.overpass import DynamicOverpassResource
 
 
 class DecoratorEnumerative:

@@ -1,6 +1,6 @@
 from typing import Iterator
-from validateosm.source.source import Source
-from validateosm.source.footprint import CallableFootprint
+from validate_osm.source.source import Source
+from validate_osm.source.footprint import CallableFootprint
 from weakref import WeakKeyDictionary
 import dataclasses
 import os
@@ -12,7 +12,7 @@ import geopandas as gpd
 import numpy as np
 from geopandas import GeoDataFrame
 
-from validateosm.util import concat
+from validate_osm.util import concat
 
 
 @dataclasses.dataclass
@@ -61,7 +61,7 @@ class DescriptorData:
         return data
 
     def _data(self) -> GeoDataFrame:
-        from validateosm.compare.compare import Compare
+        from validate_osm.compare.compare import Compare
         self._instance: Compare
         self._owner: Type[Compare]
 
@@ -97,6 +97,8 @@ class DescriptorData:
         data = footprint(data)
         data = data.sort_index(axis=0)
         data['iloc'] = range(len(data))
+        data['geometry'] = data['geometry'].to_crs(3857)
+        data['centroid'] = data['centroid'].to_crs(3857)
         return data
 
     def __delete__(self, instance):
@@ -110,21 +112,17 @@ class DescriptorData:
         return f'{self._instance}.data'
 
     def __bool__(self):
-        return self._data is not None
-
-    # TODO: Compare.data should not have the identifier directly applied to the data. Instead, the identifier
-    #   is applied to the footprint that groups the data; data:footprint is many-to-one; aggregate:footprint is
-    #   one-to-one.
+        return self._instance in self.cache
 
     @property
     def path(self) -> Path:
-        from validateosm.compare.compare import Compare
+        from validate_osm.compare.compare import Compare
         self._instance: Compare
         # return self._instance.directory / (self.__class__.__name__ + '.feather')
         return (
-            self._instance.directory /
-            self.__class__.__name__ /
-            f'{str(self._instance.bbox)}.feather'
+                self._instance.directory /
+                self.__class__.__name__ /
+                f'{str(self._instance.bbox)}.feather'
         )
 
     def delete(self):

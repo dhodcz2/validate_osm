@@ -4,29 +4,29 @@ import geopandas as gpd
 import datetime
 from typing import Iterable, Union
 
-# from validateosm.data import Source, Identifier, Validating, NonEssentialData, EssentialData, Haystack
+# from validate_osm.data import Source, Identifier, Validating, NonEssentialData, EssentialData, Haystack
 import numpy as np
 import pandas as pd
 import shapely.geometry.base
 from geopandas import GeoDataFrame
 
-from validateosm.config import ROOT
+from validate_osm.config import ROOT
 # from validate_building_height.base import Height, NeedlesHeight
 # from validating_building_height.base import (
 #     Height, NeedlesHeight
 # )
 from validate_building_height.base import Height, HeightOSM
-from validateosm.source.source import (
+from validate_osm.source.source import (
     BBoxStruct, BBox,
 )
-from validateosm.source import (
+from validate_osm.source import (
     Source,
     SourceOSM,
     data,
     aggregate,
     enumerative,
 )
-from validateosm.source.static import StaticBase
+from validate_osm.source.resource import StaticBase
 
 
 class NewYork(Source, abc.ABC):

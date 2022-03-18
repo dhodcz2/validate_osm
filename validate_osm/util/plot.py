@@ -45,7 +45,7 @@ from geopandas import GeoDataFrame
 #     return fig, ax
 
 
-from validateosm.util.matches import match_two_addresses
+from validate_osm.util.matches import match_two_addresses
 
 
 def plot_highlight_mismatches(mismatches: GeoDataFrame, all_matches: GeoDataFrame):

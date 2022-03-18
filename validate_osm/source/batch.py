@@ -6,7 +6,7 @@ from pathlib import Path
 
 from geopandas import GeoDataFrame
 from collections import UserDict
-from validateosm.source.pipe import DescriptorPipeSerialize
+from validate_osm.source.pipe import DescriptorPipeSerialize
 
 
 class CacheBatch(UserDict):
@@ -15,7 +15,7 @@ class CacheBatch(UserDict):
         self.data: WeakKeyDictionary[object, GeoDataFrame] = WeakKeyDictionary()
 
     def __missing__(self, key):
-        from validateosm.source import Source
+        from validate_osm.source import Source
         key: Source
         batch: GeoDataFrame = key.aggregate_factory.copy()
         identity = key.identity()

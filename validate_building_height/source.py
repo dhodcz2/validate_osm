@@ -1,53 +1,87 @@
-import abc
 import datetime
 import functools
 from typing import Iterable
 
 import numpy as np
-import pandas as pd
-import shapely.geometry
+import shapely
 from geopandas import GeoDataFrame
 
-from validate_building_height.base import (
-    Height,
-    HeightOSM
-)
-from validateosm.source import (
-    BBox
-)
-from validateosm.source import (
-    data, enumerative,
-)
-from validateosm.source.static import (
-    StaticNaive, File
-)
+from validate_building_height.building import Height, BuildingSourceOSM
+from validate_osm.source import *
+from validate_osm.source.resource import File
 
 
-class Chicago(Height, abc.ABC):
-    @data.identifier('Int64')
-    @abc.abstractmethod
-    def bldg_id(self) -> Iterable[int]:
-        """The Chicago Building ID"""
+class SourceMSBuildingFootprints(Height):
+    from validate_building_height.regional import MSBuildingFootprints
+    resource = MSBuildingFootprints()
 
-    bbox = BBox([41.83099018739837, -87.66603456346172, 41.90990199281114, -87.5919345279835])
+    def geometry(self):
+        return self.resource['geometry']
+
+    def timestamp(self):
+        return datetime.datetime(2020, 6, 10)
+
+    def address(self):
+        ...
+
+    def height_m(self):
+        ...
+
+    def start_date(self):
+        ...
+
+    def floors(self):
+        ...
 
 
-class ChicagoBuildingHeightOSM(HeightOSM, Chicago):
-    @enumerative(int)
-    def bldg_id(self) -> Iterable[int]:
+# class SourceOpenCityData(Height):
+#     from validate_building_height.regional import OpenCityData
+#     resource = OpenCityData()
+#
+#     def geometry(self):
+#         ...
+#
+#     def timestamp(self):
+#         ...
+#
+#     def address(self):
+#         ...
+#
+#     def height_m(self):
+#         ...
+#
+#     def start_date(self):
+#         ...
+#
+#     def floors(self):
+#         ...
+#
+
+class HeightOSM(BuildingSourceOSM, Height):
+    @enumerative(float)
+    def floors(self):
         yield from (
-            element.tag('chicago:building_id')
+            element.tag('building:levels')
+            for element in self.resource
+        )
+
+    @enumerative(float)
+    def height_m(self):
+        yield from (
+            element.tag('height')
             for element in self.resource
         )
 
 
-class ChicagoBuildingFootprints(Chicago, Height):
-    # TODO: Instead of 6 lines of code for classmethod property strings, perhaps just define them at the top
-    #   and enforce definition for non-ABCs
+class HeightChicagoBuildingFootprints(Height):
     name = 'cbf'
     link = 'https://data.cityofchicago.org/Buildings/Building-Footprints-current-/hz9b-7nh8'
     resource = StaticNaive(
-        files=File(url='https://data.cityofchicago.org/api/geospatial/hz9b-7nh8?method=export&format=GeoJSON')
+        files=File(
+            url='https://data.cityofchicago.org/api/geospatial/hz9b-7nh8?method=export&format=GeoJSON',
+            path=StaticNaive.directory / 'Building Footprints (current).geojson',
+        ),
+        crs=4326
     )
 
     @functools.cached_property
