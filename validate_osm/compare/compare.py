@@ -1,4 +1,5 @@
 import functools
+from python_log_indenter import IndentedLoggerAdapter
 import inspect
 import logging
 import sys
@@ -16,6 +17,7 @@ from validate_osm.source.source import (
     Source, BBox
 )
 from validate_osm.args import global_args
+
 
 
 class Compare:
@@ -51,15 +53,20 @@ class Compare:
                 source.bbox = bbox
         self.bbox = bbox
         self._footprint = None
-        logging.basicConfig(
-            stream=sys.stdout,
-            level=(
-                logging.DEBUG if debug else
-                logging.INFO if verbose else
-                logging.WARNING
-            ),
-            format='%(asctime)s - %(name)s - %(levelname)'
+        logger = logging.getLogger(__name__.partition('.')[0])
+        logger.setLevel(
+            logging.DEBUG if debug else
+            logging.INFO if verbose else
+            logging.WARNING
         )
+        handler = logging.StreamHandler()
+        formatter = logging.Formatter(f"%(levelname)10s %(message)s")
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+        logger = IndentedLoggerAdapter(logger)
+        self.logger = logger
+        for source in self.sources.values():
+            source.logger = self.logger
 
     @property
     def footprint(self) -> CallableFootprint:

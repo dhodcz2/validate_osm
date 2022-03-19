@@ -18,7 +18,7 @@ from shapely.geometry import Polygon
 from validate_osm.source.overpass import DynamicOverpassResource
 from validate_osm.source.source import Source
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__.partition('.')[0])
 
 class SourceOSM(Source, abc.ABC):
     resource = DynamicOverpassResource()

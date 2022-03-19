@@ -143,6 +143,10 @@ class DescriptorEnumerative:
 
     def appendix(self) -> gpd.GeoDataFrame:
         cache = DecoratorEnumerative.cache.setdefault(self.source, {})
+        if not len(cache):
+            self.source.logger.warning(
+                f"{self.source.__class__.__name__}.resource has no enumerative entries; this is an unlikely outcome."
+            )
         lens = {
             id: max(len(list) for list in column.values())
             for id, column in cache.items()
@@ -189,6 +193,9 @@ class DynamicOverpassResource(Resource):
         return self
 
     def __iter__(self) -> Iterator[Element]:
+        # Because Overpass caches identical query responses, we can load/unload every result without network load.
+        #   Perhaps row-wise construction is more efficient for building the DataFrame because reloading is not
+        #   necessary? Regardless, this is simpler to code and can be optimized later.
         for result in self.ways:
             yield from result.elements()
         for result in self.relations:

@@ -1,3 +1,4 @@
+import logging
 import abc
 import dataclasses
 import itertools
@@ -111,6 +112,14 @@ class Source(abc.ABC, metaclass=SourceMeta):
         if abstracts:
             raise TypeError(f"{self.__class__.__name__} inherited abstract methods for its data: {abstracts}")
         self.ignore_file = ignore_file
+
+        self.logger = logging.getLogger(__name__.partition('.')[0])
+        # TODO: How can Source add a handler to its own instance of logger without things getting crazy?
+        # self.logger.setLevel(logging.INFO)
+        # handler = logging.StreamHandler()
+        # formatter = logging.Formatter(f"%(levelname)10s %(message)s")
+        # handler.setFormatter(formatter)
+        # self.logger.addHandler(handler)
 
     '''
     raw >> data >> groups >> aggregate >> identity >> exclude >> batch

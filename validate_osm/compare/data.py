@@ -1,21 +1,20 @@
-import logging
-from typing import Iterator
-from validate_osm.source.source import Source
-from validate_osm.source.footprint import CallableFootprint
-from weakref import WeakKeyDictionary
 import dataclasses
+import logging
 import os
-import warnings
 from pathlib import Path
 from typing import Generator, Union, Type, Any
+from typing import Iterator, Optional
+from weakref import WeakKeyDictionary
 
 import geopandas as gpd
 import numpy as np
 from geopandas import GeoDataFrame
 
+from validate_osm.source.footprint import CallableFootprint
+from validate_osm.source.source import Source
 from validate_osm.util import concat
+from validate_osm.util.scripts import logged_subprocess
 
-logger = logging.getLogger(__name__)
 
 @dataclasses.dataclass
 class StructData:
@@ -43,6 +42,9 @@ class DescriptorData:
         self._owner = None
 
     def __get__(self, instance: object, owner: Type) -> Union[GeoDataFrame, 'DescriptorData']:
+        from validate_osm.compare.compare import Compare
+        instance: Optional[Compare]
+        owner: Optional[Type[Compare]]
         self._instance = instance
         self._owner = owner
         if instance is None:
@@ -53,15 +55,19 @@ class DescriptorData:
         # TODO: Perhaps if there is a file with a bbox that contains instance.bbox, load
         #   that bbox, .within it,
         if path.exists() and not instance.ignore_file:
-            logger.info(f'reading {owner.__name__}.data from {path}')
-            data = self.cache[instance] = gpd.read_feather(path)
+            with logged_subprocess(
+                    instance.logger,
+                    f'reading {owner.__name__}.data from {path} ({os.path.getsize(path) / 1024 / 1024 :.1f} MB)'
+            ):
+                data = self.cache[instance] = gpd.read_feather(path)
         else:
-            logger.info(f'building {owner.__name__}.data')
-            data = self.cache[instance] = self._data()
+            with logged_subprocess(instance.logger, f'building {owner.__name__}.data'):
+                data = self.cache[instance] = self._data()
+
             if not path.parent.exists():
                 os.makedirs(path.parent)
-            logger.info(f'serializing {owner.__name__}.data {path}')
-            data.to_feather(path)
+            with logged_subprocess(instance.logger, f'serializing {owner.__name__}.data {path}'):
+                data.to_feather(path)
         return data
 
     def _data(self) -> GeoDataFrame:
@@ -83,16 +89,19 @@ class DescriptorData:
                     data['group'] = np.nan
                 data = data.set_index(['name', 'id', 'group'], drop=True)
                 yield data
-                logger.debug(f'{self.__class__.__name__}.data done; deleting {source.resource.__class__.__name__}')
+                self._instance.logger.debug(f'deleting {source.resource.__class__.__name__}')
                 del source.data
 
-        logger.debug(f'concatenating {self.__class__.__name__}.data')
-        data = concat(datas())
+        with logged_subprocess(
+                self._instance.logger, f'concatenating {self.__class__.__name__}.data',
+                level=logging.DEBUG
+        ):
+            data = concat(datas())
 
         # TODO: Investigate how these invalid geometries came to be
         inval = data[data['geometry'].isna() | data['centroid'].isna()].index
         if len(inval):
-            logger.warning(f'no geom: {inval}')
+            self._instance.logger.warning(f'no geom: {inval}')
             data = data.drop(index=inval)
 
         # Instantiate Compare.footprint; use it to group Compare.data
@@ -104,13 +113,20 @@ class DescriptorData:
         for other_footprint, other_source in footprints:
             if other_footprint is not footprint:
                 raise ValueError(f"{source.__class__.__name__}.footprint!={other_source.__class__.name}.footprint")
-        footprint = self._instance.footprint = footprint(
-            data,
-            path=self._instance.directory / 'footprint.feather',
-            ignore_file=self._instance.ignore_file
-        )
 
-        data = footprint(data)
+        self.cache[self._instance] = data
+
+        with logged_subprocess(self._instance.logger, 'loading footprints'):
+            footprint = self._instance.footprint = footprint(self._instance)
+            # footprint = self._instance.footprint = footprint(
+            #     data,
+            #     path=self._instance.directory / 'footprint.feather',
+            #     ignore_file=self._instance.ignore_file
+            # )
+
+        with logged_subprocess(self._instance.logger, 'applying footprints'):
+            data = footprint(data)
+
         data = data.sort_index(axis=0)
         data['iloc'] = range(len(data))
         data['geometry'] = data['geometry'].to_crs(3857)
@@ -134,7 +150,6 @@ class DescriptorData:
     def path(self) -> Path:
         from validate_osm.compare.compare import Compare
         self._instance: Compare
-        # return self._instance.directory / (self.__class__.__name__ + '.feather')
         return (
                 self._instance.directory /
                 self.__class__.__name__ /

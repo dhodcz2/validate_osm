@@ -23,7 +23,8 @@ from shapely.geometry import Polygon
 from validate_osm.args import global_args as project_args
 from validate_osm.util.scripts import concat
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__.partition('.')[0])
+
 
 @dataclasses.dataclass(repr=False)
 class File:
@@ -40,6 +41,7 @@ class File:
 
 def empty_dir(path: Path) -> bool:
     return True if next(path.iterdir(), None) is None else False
+
 
 #
 # def get(self) -> None:
@@ -265,8 +267,8 @@ class StaticNaive(StaticBase):
         self.columns = columns
         self._cache = None
         self.preprocess = preprocess
-        self.name=name
-        self.link=link
+        self.name = name
+        self.link = link
 
     def __get__(self, instance, owner):
         from validate_osm.source import Source

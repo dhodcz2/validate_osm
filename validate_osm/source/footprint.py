@@ -1,7 +1,6 @@
 import functools
 import itertools
-import logging
-from pathlib import Path
+import os
 from typing import Generator, Collection
 from typing import Hashable
 
@@ -15,23 +14,43 @@ from geopandas import GeoDataFrame
 from networkx import connected_components
 from shapely.geometry.base import BaseGeometry
 
-logger = logging.getLogger(__name__)
+from validate_osm.util.scripts import logged_subprocess
 
 
-# TODO: Footprint must be cached as well because it takes very significant time to construct
 class CallableFootprint:
-    def __init__(self, data: GeoDataFrame, path: Path, ignore_file: bool = False):
-        if not ignore_file and path.exists():
-            logger.info(f'reading footprints from {path}')
-            self.footprints = gpd.read_feather(path)
+    # def __init__(self, data: GeoDataFrame, path: Path, ignore_file: bool = False):
+    #     if not ignore_file and path.exists():
+    #         with logged_subprocess(logger, f'reading footprints from {path}'):
+    #             self.footprints = gpd.read_feather(path)
+    #     else:
+    #         with logged_subprocess(logger, 'building footprints'):
+    #             self.footprints = self._footprints(data)
+    #         logger.info(f'footprints built {len(self.footprints)=} from {len(data)=}')
+    #
+    #         if not path.parent.exists():
+    #             os.makedirs(path)
+    #         with logged_subprocess(logger, f'serializing footprints to {path}'):
+    #             self.footprints.to_feather(path)
+    def __init__(self, compare: object):
+        from validate_osm.compare.compare import Compare
+        compare: Compare
+        self.compare = compare
+        path = compare.directory / 'footprint.feather'
+        if not compare.ignore_file and path.exists():
+            with logged_subprocess(compare.logger, f'reading footprints from {path}'):
+                self.footprints = gpd.read_feather(path)
         else:
-            logger.info(f'building footprints')
-            self.footprints = self._footprints(data)
-            logger.info(f'serializing footprints to {path}')
-            self.footprints.to_feather(path)
+            data = compare.data
+            with logged_subprocess(compare.logger, 'building footprints'):
+                self.footprints = self._footprints(data)
+                compare.logger.info(f'{len(self.footprints)=} from {len(data)=}')
+
+            if not path.parent.exists():
+                os.makedirs(path)
+            with logged_subprocess(compare.logger, f'serializing footprints to {path}'):
+                self.footprints.to_feather(path)
 
     def _footprints(self, data: GeoDataFrame) -> GeoDataFrame:
-        logger.info(f'compiling {self.__class__.__name__} footprints')
         data = data[['geometry', 'centroid']].copy()
         data['geometry'] = data['geometry'].to_crs(3857)
         data['centroid'] = data['centroid'].to_crs(3857)
@@ -116,11 +135,12 @@ class CallableFootprint:
             'centroid': gpd.GeoSeries(centroid(), crs=data['centroid'].crs)
         })
         identity = self.identity(footprints)
+        self.compare.logger.debug(f'identified footprints with {identity.name=}')
         footprints = footprints.set_index(identity)
 
         footprints['geometry'] = footprints['geometry'].to_crs(3857)
         footprints['centroid'] = footprints['centroid'].to_crs(3857)
-        logger.info(f'{self.__class__.__name__} compiled {len(footprints)=} from {len(data)=}')
+
         return footprints
 
     def identity(self, gdf: GeoDataFrame) -> pd.Series:
@@ -135,7 +155,6 @@ class CallableFootprint:
         return annoy
 
     def __call__(self, data: GeoDataFrame) -> GeoDataFrame:
-        logger.debug('applying footprints')
         data['geometry'] = data['geometry'].to_crs(3857)
         data['centroid'] = data['centroid'].to_crs(3857)
         data['area'] = data['geometry'].area

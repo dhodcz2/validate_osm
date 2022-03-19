@@ -1,14 +1,12 @@
 import abc
 import inspect
-import logging
 import os
 from pathlib import Path
 from typing import DefaultDict, Type, Union
 from weakref import WeakKeyDictionary
 
 import geopandas as gpd
-
-logger = logging.getLogger(__name__)
+from validate_osm.util.scripts import logged_subprocess
 
 
 class DescriptorPipe:
@@ -54,15 +52,20 @@ class DescriptorPipeSerialize(DescriptorPipe, abc.ABC):
             return self._cache[instance]
         path = self.path
         if not instance.ignore_file and path.exists():
-            logger.info(f'reading {owner.__name__}.{self.name} from {path}')
-            data = self._cache[instance] = gpd.read_feather(path)
-            return data
-        logger.info(f'building {owner.__name__}.{self.name}')
-        data: gpd.GeoDataFrame = self._cache[instance]
+            with logged_subprocess(
+                    instance.logger,
+                    f'reading {owner.__name__}.{self.name} from {path} ({os.path.getsize(path) / 1024 / 1024 :.1f} MB)'
+            ):
+                data = self._cache[instance] = gpd.read_feather(path)
+                return data
+
+        with logged_subprocess(instance.logger, f'building {owner.__name__}.{self.name}'):
+            data: gpd.GeoDataFrame = self._cache[instance]
+
         if not path.parent.exists():
             os.makedirs(path.parent)
-        logger.info(f'serializing {owner.__name__}.{self.name} to {path}')
-        data.to_feather(path)
+        with logged_subprocess(instance.logger, f'serializing {owner.__name__}.{self.name} to {path}'):
+            data.to_feather(path)
         return data
 
     @property

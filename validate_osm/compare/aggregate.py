@@ -1,19 +1,23 @@
-import functools
 import itertools
 import logging
 import os
 from pathlib import Path
 from typing import Iterator
-from typing import Union, Type
+from typing import Union
+from weakref import WeakKeyDictionary
 
 import geopandas as gpd
 import pandas as pd
 from geopandas import GeoDataFrame
+from python_log_indenter import IndentedLoggerAdapter
 
 from validate_osm.source.aggregate import AggregateFactory
 from validate_osm.source.groups import Groups
 from validate_osm.source.source import Source
-from weakref import WeakKeyDictionary
+from validate_osm.util.scripts import logged_subprocess
+
+logger = logging.getLogger(__name__.partition('.')[0])
+logger = IndentedLoggerAdapter(logger)
 
 
 class DescriptorAggregate:
@@ -28,15 +32,16 @@ class DescriptorAggregate:
             return self.cache[instance]
         path = self.path
         if instance.ignore_file or not path.exists():
-            logging.info(f'building {owner}.data')
-            agg = self.cache[instance] = self._aggregate()
+            with logged_subprocess(logger, f'building {owner}.data'):
+                agg = self.cache[instance] = self._aggregate()
+
             if not path.parent.exists():
                 os.makedirs(path.parent)
-            logging.info(f'serializing {owner}.data to {path}')
-            agg.to_feather(path)
+            with logged_subprocess(logger, f'serializing {owner}.data to {path}'):
+                agg.to_feather(path)
         else:
-            logging.info(f'reading {owner}.aggregate from {path}')
-            agg = self.cache[instance]
+            with logged_subprocess(logger, f'reading {owner}.aggregate from {path}'):
+                agg = self.cache[instance] = gpd.read_feather(self.path)
         return agg
 
     def _groups(self) -> Groups:
@@ -60,9 +65,6 @@ class DescriptorAggregate:
         return Groups(data.copy(), grouped, ungrouped)
 
     def _aggregate(self) -> gpd.GeoDataFrame:
-        if self.path.exists() and not self._instance.ignore_file:
-            return gpd.read_feather(self.path)
-
         groups = self._groups()
         sources = self._instance.sources.values()
         factories: Iterator[tuple[AggregateFactory, Source]] = zip(
@@ -87,7 +89,6 @@ class DescriptorAggregate:
     def path(self) -> Path:
         from validate_osm.compare.compare import Compare
         self._instance: Compare
-        # return self._instance.directory / (self.__class__.__name__ + '.feather')
         return (
                 self._instance.directory /
                 self.__class__.__name__ /

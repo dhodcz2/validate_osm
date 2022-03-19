@@ -1,11 +1,9 @@
 import datetime
-import functools
 from typing import Iterable
 
 import numpy as np
 import pandas as pd
 import shapely
-from geopandas import GeoDataFrame
 
 from validate_building_height.building import Height, BuildingSourceOSM
 from validate_osm.source import *
