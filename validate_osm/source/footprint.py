@@ -46,7 +46,7 @@ class CallableFootprint:
                 compare.logger.info(f'{len(self.footprints)=} from {len(data)=}')
 
             if not path.parent.exists():
-                os.makedirs(path)
+                os.makedirs(path.parent)
             with logged_subprocess(compare.logger, f'serializing footprints to {path}'):
                 self.footprints.to_feather(path)
 

@@ -23,8 +23,6 @@ from shapely.geometry import Polygon
 from validate_osm.args import global_args as project_args
 from validate_osm.util.scripts import concat
 
-logger = logging.getLogger(__name__.partition('.')[0])
-
 
 @dataclasses.dataclass(repr=False)
 class File:
@@ -66,13 +64,10 @@ def empty_dir(path: Path) -> bool:
 def get(session: requests.Session, file: File) -> None:
     response = session.get(file.url, stream=True)
     response.raise_for_status()
-    logger.debug(f'\t{file.name}')
-    logger.debug(f'\t{response.status_code}')
     with open(file.path, 'wb') as f:
         for chunk in response.iter_content(chunk_size=1024):
             if chunk:
                 f.write(chunk)
-    logger.debug(f'\tdone')
 
 
 class Resource(abc.ABC):
@@ -96,9 +91,10 @@ class StaticBase(Resource):
 
     flipped = classmethod(property(abc.abstractmethod(flipped)))
 
-    @abc.abstractmethod
     def __get__(self, instance, owner) -> GeoDataFrame:
-        ...
+        self.instance = instance
+        self.owner = owner
+        return self
 
     @abc.abstractmethod
     def __delete__(self, instance):
@@ -109,18 +105,19 @@ class StaticBase(Resource):
     def directory(cls) -> Path:
         return Path(inspect.getfile(cls)).parent / 'static' / cls.__name__
 
-    @classmethod
     def _from_file(
-            cls,
+            self,
             file: File,
             bbox: Optional[shapely.geometry.Polygon] = None,
             debug=False
             # columns: Optional[list[str]] = None
     ) -> Union[pd.DataFrame, GeoDataFrame]:
+        from validate_osm.source.source import Source
+        self.instance: Source
         # TODO: Why is file.path different than file.name?
         gdf: Union[GeoDataFrame, pd.DataFrame]
         t = time.time()
-        logger.info(f'reading {file.path}')
+        self.instance.logger.info(f'reading {file.path}')
         match file.path.name.rpartition('.')[2]:
             case 'feather':
                 try:
@@ -145,12 +142,11 @@ class StaticBase(Resource):
                     gdf = gpd.read_file(file.path, rows=100 if debug else None, bbox=bbox)
                 except (AttributeError, TypeError) as e:
                     raise NotImplementedError from e
-        logger.info(f'{file.name} took {(time.time() - t) / 60} minutes to load.')
+        self.instance.logger.info(f'{file.name} took {(time.time() - t) / 60} minutes to load.')
         return gdf
 
-    @classmethod
     def _from_files(
-            cls,
+            self,
             files: list[File],
             bbox: Optional[shapely.geometry.Polygon] = None,
             columns: Optional[list[str]] = None,
@@ -166,7 +162,7 @@ class StaticBase(Resource):
                 if not file.path.parent.exists():
                     os.makedirs(file.path.parent)
             names = ', '.join(file.name for file in download) + '...'
-            logger.info(f"fetching {names}")
+            self.instance.logger.info(f"fetching {names}")
             with requests.Session() as session, \
                     concurrent.futures.ThreadPoolExecutor() as te:
                 future_url_request = [
@@ -176,7 +172,7 @@ class StaticBase(Resource):
                 processes = []
                 for future in concurrent.futures.as_completed(future_url_request):
                     processes.append(future.result())
-                logger.info('done fetching')
+                self.instance.logger.info('done fetching')
 
         if preprocess:
             preprocess = [
@@ -186,24 +182,24 @@ class StaticBase(Resource):
             preprocessing = [(file, path) for file, path in preprocess if not path.exists()]
             if preprocessing:
                 paths = [path for file, path in preprocessing]
-                logger.warning(f'Preprecessing {paths}; this may take a while.')
+                self.instance.logger.warning(f'Preprecessing {paths}; this may take a while.')
                 # TODO: Note: Illinois.geojson.zip is 1.35 GB, but expands in memory to about 5 GB
                 for file, path in preprocessing:
-                    gdf = cls._from_file(file)
+                    gdf = self._from_file(file)
                     t = time.time()
-                    logger.info(f'serializing {file.path}')
+                    self.instance.logger.info(f'serializing {file.path}')
                     gdf.to_feather(path)
-                    logger.info(f'{path.name} to {(time.time() - t) / 60} minutes to serialize.')
+                    self.instance.logger.info(f'{path.name} to {(time.time() - t) / 60} minutes to serialize.')
 
             for file, path in preprocess:
                 file.path = path
 
         dfs: Union[Iterator[GeoDataFrame], Iterator[pd.DataFrame]] = (
-            cls._from_file(file, bbox, columns)
+            self._from_file(file, bbox, columns)
             for file in files
         )
         if len(files) > 1:
-            logger.info(f"concatenating GeoDataFrame from {', '.join(file.name for file in files)}")
+            self.instance.logger.info(f"concatenating GeoDataFrame from {', '.join(file.name for file in files)}")
             result = concat(dfs)
         else:
             result = next(dfs)
@@ -225,7 +221,7 @@ class StaticBase(Resource):
 
     @property
     def bbox(self) -> shapely.geometry.Polygon:
-        bbox = self._instance.bbox.data
+        bbox = self.instance.bbox.data
         orientation = (bbox.ellipsoidal if self.flipped else bbox.cartesian)
         gs = gpd.GeoSeries((orientation,), crs=self.crs)
         gs = gs.to_crs(self.crs)
@@ -272,9 +268,9 @@ class StaticNaive(StaticBase):
 
     def __get__(self, instance, owner):
         from validate_osm.source import Source
-        self._owner: Source = owner
-        self._instance: Type[Source] = instance
-        if self._instance is None:
+        self.owner: Source = owner
+        self.instance: Type[Source] = instance
+        if self.instance is None:
             return self
         if self._cache is None:
             self._cache = self._from_files(self.files, self.bbox)
@@ -351,8 +347,8 @@ class StaticRegional(StaticBase, abc.ABC):
         self.cache: WeakKeyDictionary[object, GeoDataFrame] = WeakKeyDictionary()
 
     def __get__(self, instance, owner) -> Union[GeoDataFrame, 'StaticRegional']:
-        self._instance = instance
-        self._owner = owner
+        self.instance = instance
+        self.owner = owner
         if instance is None:
             return self
         if instance in self.cache:

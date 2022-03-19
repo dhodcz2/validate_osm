@@ -116,7 +116,7 @@ class DescriptorData:
 
         self.cache[self._instance] = data
 
-        with logged_subprocess(self._instance.logger, 'loading footprints'):
+        with logged_subprocess(self._instance.logger, 'getting footprints'):
             footprint = self._instance.footprint = footprint(self._instance)
             # footprint = self._instance.footprint = footprint(
             #     data,
