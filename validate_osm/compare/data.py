@@ -15,6 +15,7 @@ from geopandas import GeoDataFrame
 
 from validate_osm.util import concat
 
+logger = logging.getLogger(__name__)
 
 @dataclasses.dataclass
 class StructData:
@@ -52,14 +53,14 @@ class DescriptorData:
         # TODO: Perhaps if there is a file with a bbox that contains instance.bbox, load
         #   that bbox, .within it,
         if path.exists() and not instance.ignore_file:
-            logging.info(f'reading {owner.__name__}.data from {path}')
+            logger.info(f'reading {owner.__name__}.data from {path}')
             data = self.cache[instance] = gpd.read_feather(path)
         else:
-            logging.info(f'building {owner.__name__}.data')
+            logger.info(f'building {owner.__name__}.data')
             data = self.cache[instance] = self._data()
             if not path.parent.exists():
                 os.makedirs(path.parent)
-            logging.info(f'serializing {owner.__name__}.data {path}')
+            logger.info(f'serializing {owner.__name__}.data {path}')
             data.to_feather(path)
         return data
 
@@ -82,18 +83,17 @@ class DescriptorData:
                     data['group'] = np.nan
                 data = data.set_index(['name', 'id', 'group'], drop=True)
                 yield data
-                logging.debug(f'{self.__class__.__name__}.data done; deleting {source.resource.__class__.__name__}')
+                logger.debug(f'{self.__class__.__name__}.data done; deleting {source.resource.__class__.__name__}')
                 del source.data
 
-        logging.debug(f'concatenating {self.__class__.__name__}.data')
+        logger.debug(f'concatenating {self.__class__.__name__}.data')
         data = concat(datas())
 
         # TODO: Investigate how these invalid geometries came to be
         inval = data[data['geometry'].isna() | data['centroid'].isna()].index
         if len(inval):
-            logging.warning(f'no geom: {inval}')
+            logger.warning(f'no geom: {inval}')
             data = data.drop(index=inval)
-
 
         # Instantiate Compare.footprint; use it to group Compare.data
         sources = self._instance.sources.values()
@@ -104,7 +104,11 @@ class DescriptorData:
         for other_footprint, other_source in footprints:
             if other_footprint is not footprint:
                 raise ValueError(f"{source.__class__.__name__}.footprint!={other_source.__class__.name}.footprint")
-        footprint = self._instance.footprint = footprint(data)
+        footprint = self._instance.footprint = footprint(
+            data,
+            path=self._instance.directory / 'footprint.feather',
+            ignore_file=self._instance.ignore_file
+        )
 
         data = footprint(data)
         data = data.sort_index(axis=0)

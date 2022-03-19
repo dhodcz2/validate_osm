@@ -18,6 +18,7 @@ from shapely.geometry import Polygon
 from validate_osm.source.overpass import DynamicOverpassResource
 from validate_osm.source.source import Source
 
+logger = logging.getLogger(__name__)
 
 class SourceOSM(Source, abc.ABC):
     resource = DynamicOverpassResource()
@@ -29,7 +30,7 @@ class SourceOSM(Source, abc.ABC):
         # Set ID as an index
 
         # append enumerative entries
-        logging.debug(f"appending {self.__class__}.resource.enumerative")
+        logger.debug(f"appending {self.__class__}.resource.enumerative")
         data = data.append(self.resource.enumerative)
 
         # Group together according to relations

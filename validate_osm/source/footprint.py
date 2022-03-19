@@ -1,8 +1,8 @@
-import logging
-import logging
 import functools
 import itertools
-from typing import Generator, Union, Collection, Optional
+import logging
+from pathlib import Path
+from typing import Generator, Collection
 from typing import Hashable
 
 import geopandas as gpd
@@ -15,14 +15,23 @@ from geopandas import GeoDataFrame
 from networkx import connected_components
 from shapely.geometry.base import BaseGeometry
 
+logger = logging.getLogger(__name__)
 
+
+# TODO: Footprint must be cached as well because it takes very significant time to construct
 class CallableFootprint:
-
-    def __init__(self, data: GeoDataFrame):
-        self.footprints = self._footprints(data)
+    def __init__(self, data: GeoDataFrame, path: Path, ignore_file: bool = False):
+        if not ignore_file and path.exists():
+            logger.info(f'reading footprints from {path}')
+            self.footprints = gpd.read_feather(path)
+        else:
+            logger.info(f'building footprints')
+            self.footprints = self._footprints(data)
+            logger.info(f'serializing footprints to {path}')
+            self.footprints.to_feather(path)
 
     def _footprints(self, data: GeoDataFrame) -> GeoDataFrame:
-        logging.info(f'compiling {self.__class__.__name__} footprints')
+        logger.info(f'compiling {self.__class__.__name__} footprints')
         data = data[['geometry', 'centroid']].copy()
         data['geometry'] = data['geometry'].to_crs(3857)
         data['centroid'] = data['centroid'].to_crs(3857)
@@ -111,7 +120,7 @@ class CallableFootprint:
 
         footprints['geometry'] = footprints['geometry'].to_crs(3857)
         footprints['centroid'] = footprints['centroid'].to_crs(3857)
-        logging.info(f'{self.__class__.__name__} compiled {len(footprints)=} from {len(data)=}')
+        logger.info(f'{self.__class__.__name__} compiled {len(footprints)=} from {len(data)=}')
         return footprints
 
     def identity(self, gdf: GeoDataFrame) -> pd.Series:
@@ -126,6 +135,7 @@ class CallableFootprint:
         return annoy
 
     def __call__(self, data: GeoDataFrame) -> GeoDataFrame:
+        logger.debug('applying footprints')
         data['geometry'] = data['geometry'].to_crs(3857)
         data['centroid'] = data['centroid'].to_crs(3857)
         data['area'] = data['geometry'].area

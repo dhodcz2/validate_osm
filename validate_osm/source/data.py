@@ -13,6 +13,7 @@ from pandas.core.indexes.range import RangeIndex
 
 from validate_osm.source.pipe import DescriptorPipeSerialize
 
+logger = logging.getLogger(__name__)
 
 @dataclasses.dataclass
 class StructData:
@@ -56,7 +57,7 @@ class StructData:
             # Got a Series
             if isinstance(obj, Series):
                 if not isinstance(obj.index, pandas.core.indexes.range.RangeIndex):
-                    logging.debug(
+                    logger.debug(
                         f"{obj}.index returns a {type(obj.index)}; naively passing this may result in a mismatched "
                         f"column index. Resetting this index so that column indices align regardless of implementation."
                     )
@@ -264,7 +265,7 @@ class CacheData(UserDict):
                 # data[struct.name] = series.repeat(rows) if len(series) == 1 else series
             depend.difference_update(viable)
         data = source.group()
-        logging.debug(f'{source.__class__.__name__}.data done; deleting {source.resource.__class__.__name__}')
+        logger.debug(f'{source.__class__.__name__}.data done; deleting {source.resource.__class__.__name__}')
         del source.resource
         return data
 

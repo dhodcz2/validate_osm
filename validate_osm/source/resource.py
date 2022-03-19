@@ -23,6 +23,7 @@ from shapely.geometry import Polygon
 from validate_osm.args import global_args as project_args
 from validate_osm.util.scripts import concat
 
+logger = logging.getLogger(__name__)
 
 @dataclasses.dataclass(repr=False)
 class File:
@@ -42,7 +43,7 @@ def empty_dir(path: Path) -> bool:
 
 #
 # def get(self) -> None:
-#     logging.info(f'fetching {self}')
+#     logger.info(f'fetching {self}')
 #     response = requests.get(self.url, stream=True)
 #     response.raise_for_status()
 #     if 'Content-Disposition' in response.headers.keys():
@@ -63,13 +64,13 @@ def empty_dir(path: Path) -> bool:
 def get(session: requests.Session, file: File) -> None:
     response = session.get(file.url, stream=True)
     response.raise_for_status()
-    logging.debug(f'\t{file.name}')
-    logging.debug(f'\t{response.status_code}')
+    logger.debug(f'\t{file.name}')
+    logger.debug(f'\t{response.status_code}')
     with open(file.path, 'wb') as f:
         for chunk in response.iter_content(chunk_size=1024):
             if chunk:
                 f.write(chunk)
-    logging.debug(f'\tdone')
+    logger.debug(f'\tdone')
 
 
 class Resource(abc.ABC):
@@ -117,7 +118,7 @@ class StaticBase(Resource):
         # TODO: Why is file.path different than file.name?
         gdf: Union[GeoDataFrame, pd.DataFrame]
         t = time.time()
-        logging.info(f'reading {file.path}')
+        logger.info(f'reading {file.path}')
         match file.path.name.rpartition('.')[2]:
             case 'feather':
                 try:
@@ -142,7 +143,7 @@ class StaticBase(Resource):
                     gdf = gpd.read_file(file.path, rows=100 if debug else None, bbox=bbox)
                 except (AttributeError, TypeError) as e:
                     raise NotImplementedError from e
-        logging.info(f'{file.name} took {(time.time() - t) / 60} minutes to load.')
+        logger.info(f'{file.name} took {(time.time() - t) / 60} minutes to load.')
         return gdf
 
     @classmethod
@@ -163,7 +164,7 @@ class StaticBase(Resource):
                 if not file.path.parent.exists():
                     os.makedirs(file.path.parent)
             names = ', '.join(file.name for file in download) + '...'
-            logging.info(f"fetching {names}")
+            logger.info(f"fetching {names}")
             with requests.Session() as session, \
                     concurrent.futures.ThreadPoolExecutor() as te:
                 future_url_request = [
@@ -173,7 +174,7 @@ class StaticBase(Resource):
                 processes = []
                 for future in concurrent.futures.as_completed(future_url_request):
                     processes.append(future.result())
-                logging.info('done fetching')
+                logger.info('done fetching')
 
         if preprocess:
             preprocess = [
@@ -183,14 +184,14 @@ class StaticBase(Resource):
             preprocessing = [(file, path) for file, path in preprocess if not path.exists()]
             if preprocessing:
                 paths = [path for file, path in preprocessing]
-                logging.warning(f'Preprecessing {paths}; this may take a while.')
+                logger.warning(f'Preprecessing {paths}; this may take a while.')
                 # TODO: Note: Illinois.geojson.zip is 1.35 GB, but expands in memory to about 5 GB
                 for file, path in preprocessing:
                     gdf = cls._from_file(file)
                     t = time.time()
-                    logging.info(f'serializing {file.path}')
+                    logger.info(f'serializing {file.path}')
                     gdf.to_feather(path)
-                    logging.info(f'{path.name} to {(time.time() - t) / 60} minutes to serialize.')
+                    logger.info(f'{path.name} to {(time.time() - t) / 60} minutes to serialize.')
 
             for file, path in preprocess:
                 file.path = path
@@ -200,7 +201,7 @@ class StaticBase(Resource):
             for file in files
         )
         if len(files) > 1:
-            logging.info(f"concatenating GeoDataFrame from {', '.join(file.name for file in files)}")
+            logger.info(f"concatenating GeoDataFrame from {', '.join(file.name for file in files)}")
             result = concat(dfs)
         else:
             result = next(dfs)

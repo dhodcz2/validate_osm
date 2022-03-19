@@ -1,11 +1,14 @@
-import logging
-from weakref import WeakKeyDictionary
-import geopandas as gpd
 import abc
 import inspect
+import logging
 import os
 from pathlib import Path
-from typing import DefaultDict, Type, Optional, Union
+from typing import DefaultDict, Type, Union
+from weakref import WeakKeyDictionary
+
+import geopandas as gpd
+
+logger = logging.getLogger(__name__)
 
 
 class DescriptorPipe:
@@ -40,21 +43,6 @@ class DescriptorPipeSerialize(DescriptorPipe, abc.ABC):
     name: str
 
     def __get__(self, instance: object, owner: Type):
-        # TODO: Never use self._instance from __get__; in the debugger it causes weirdness
-        # from validate_osm.source import Source
-        # self._instance: Source = instance
-        # self._owner: Type[Source] = owner
-        # if instance is not None and instance not in self._cache:
-        #     path = self.path
-        #     if path.exists() and not instance.ignore_file:
-        #         self._cache[instance] = gpd.read_feather(path)
-        #     else:
-        #         if not path.parent.exists():
-        #             os.makedirs(path.parent)
-        #         self._cache[instance].to_feather(path)
-        #     return self._cache[instance]
-        # return super(DescriptorPipeSerialize, self).__get__(instance, owner)
-
         from validate_osm.source import Source
         instance: Union[Source, object]
         owner: Type[Source]
@@ -66,14 +54,14 @@ class DescriptorPipeSerialize(DescriptorPipe, abc.ABC):
             return self._cache[instance]
         path = self.path
         if not instance.ignore_file and path.exists():
-            logging.info(f'reading {owner.__name__}.{self.name} from {path}')
+            logger.info(f'reading {owner.__name__}.{self.name} from {path}')
             data = self._cache[instance] = gpd.read_feather(path)
             return data
-        logging.info(f'building {owner.__name__}.{self.name}')
+        logger.info(f'building {owner.__name__}.{self.name}')
         data: gpd.GeoDataFrame = self._cache[instance]
         if not path.parent.exists():
             os.makedirs(path.parent)
-        logging.info(f'serializing {owner.__name__}.{self.name} to {path}')
+        logger.info(f'serializing {owner.__name__}.{self.name} to {path}')
         data.to_feather(path)
         return data
 

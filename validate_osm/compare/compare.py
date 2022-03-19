@@ -1,6 +1,7 @@
 import functools
 import inspect
 import logging
+import sys
 from pathlib import Path
 from typing import Union, Iterable, Type, Hashable, Optional
 
@@ -51,12 +52,13 @@ class Compare:
         self.bbox = bbox
         self._footprint = None
         logging.basicConfig(
+            stream=sys.stdout,
             level=(
                 logging.DEBUG if debug else
                 logging.INFO if verbose else
                 logging.WARNING
             ),
-            format='%(asctime)s - %(levelname)s - %(message)s'
+            format='%(asctime)s - %(name)s - %(levelname)'
         )
 
     @property
