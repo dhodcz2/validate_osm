@@ -1,27 +1,24 @@
-from weakref import WeakKeyDictionary
-import logging
-from geopandas import GeoDataFrame
-import time
 import abc
 import concurrent.futures
 import dataclasses
 import functools
 import inspect
 import os
-import re
-import warnings
+import time
 from pathlib import Path
 from typing import Generator, Any
 from typing import Union, Iterable, Optional, Type, Iterator, Collection
+from weakref import WeakKeyDictionary
 
 import geopandas as gpd
 import pandas as pd
 import requests
 import shapely.geometry
+from geopandas import GeoDataFrame
 from shapely.geometry import Polygon
 
 from validate_osm.args import global_args as project_args
-from validate_osm.util.scripts import concat
+from validate_osm.util.scripts import concat, logged_subprocess
 
 
 @dataclasses.dataclass(repr=False)
@@ -36,29 +33,13 @@ class File:
     def __repr__(self):
         return self.name
 
+    @functools.cached_property
+    def preprocessed_path(self) -> Path:
+        return self.path.parent / (self.path.name.rpartition('.')[0] + '.feather')
+
 
 def empty_dir(path: Path) -> bool:
     return True if next(path.iterdir(), None) is None else False
-
-
-#
-# def get(self) -> None:
-#     logger.info(f'fetching {self}')
-#     response = requests.get(self.url, stream=True)
-#     response.raise_for_status()
-#     if 'Content-Disposition' in response.headers.keys():
-#         filename = re.findall('filename=(.+)', response.headers['Content-Disposition'])[0]
-#     else:
-#         url: str = self.url
-#         filename = url.rpartition('/')
-#     path: Path = self.path
-#     path /= filename
-#     with open(path, 'wb') as file:
-#         for block in response.iter_content(1024):
-#             file.write(block)
-#     if self.unzipped:
-#         raise NotImplementedError
-#         # shutil.unpack_archive()
 
 
 def get(session: requests.Session, file: File) -> None:
@@ -105,53 +86,53 @@ class StaticBase(Resource):
     def directory(cls) -> Path:
         return Path(inspect.getfile(cls)).parent / 'static' / cls.__name__
 
-    def _from_file(
+    def _read_file(
             self,
-            file: File,
+            path: Path,
             bbox: Optional[shapely.geometry.Polygon] = None,
             debug=False
             # columns: Optional[list[str]] = None
     ) -> Union[pd.DataFrame, GeoDataFrame]:
         from validate_osm.source.source import Source
         self.instance: Source
-        # TODO: Why is file.path different than file.name?
         gdf: Union[GeoDataFrame, pd.DataFrame]
-        t = time.time()
-        self.instance.logger.info(f'reading {file.path}')
-        match file.path.name.rpartition('.')[2]:
-            case 'feather':
-                try:
-                    gdf = gpd.read_feather(file.path)
-                except (AttributeError, TypeError):
-                    gdf = pd.read_feather(file.path, )
-                if isinstance(gdf, GeoDataFrame) and bbox is not None:
-                    gdf = gdf[gdf.within(bbox)]
-                if debug:
-                    gdf = gdf.head(100)
-            case 'parquet':
-                try:
-                    gdf = gpd.read_parquet(file.path, )
-                except (AttributeError, TypeError):
-                    gdf = pd.read_parquet(file.path, )
-                if isinstance(gdf, GeoDataFrame) and bbox is not None:
-                    gdf = gdf[gdf.within(bbox)]
-                if debug:
-                    gdf = gdf.head(100)
-            case _:
-                try:
-                    gdf = gpd.read_file(file.path, rows=100 if debug else None, bbox=bbox)
-                except (AttributeError, TypeError) as e:
-                    raise NotImplementedError from e
-        self.instance.logger.info(f'{file.name} took {(time.time() - t) / 60} minutes to load.')
-        return gdf
+        with logged_subprocess(self.instance.logger, f'reading {path}'):
+            match path.name.rpartition('.')[2]:
+                case 'feather':
+                    try:
+                        gdf = gpd.read_feather(path)
+                    except (AttributeError, TypeError):
+                        gdf = pd.read_feather(path, )
+                    if isinstance(gdf, GeoDataFrame) and bbox is not None:
+                        gdf = gdf[gdf.within(bbox)]
+                    if debug:
+                        gdf = gdf.head(100)
+                case 'parquet':
+                    try:
+                        gdf = gpd.read_parquet(path, )
+                    except (AttributeError, TypeError):
+                        gdf = pd.read_parquet(path, )
+                    if isinstance(gdf, GeoDataFrame) and bbox is not None:
+                        gdf = gdf[gdf.within(bbox)]
+                    if debug:
+                        gdf = gdf.head(100)
+                case _:
+                    try:
+                        gdf = gpd.read_file(path, rows=100 if debug else None, bbox=bbox)
+                    except (AttributeError, TypeError) as e:
+                        raise NotImplementedError from e
+            return gdf
 
-    def _from_files(
+    def _handle_files(
             self,
             files: list[File],
             bbox: Optional[shapely.geometry.Polygon] = None,
             columns: Optional[list[str]] = None,
             preprocess: bool = True
     ) -> Union[pd.DataFrame, GeoDataFrame]:
+        from validate_osm.source.source import Source
+        self.instance: Optional[Source]
+        self.owner: Type[Source]
         download = [
             file for file in files
             if not file.path.exists()
@@ -175,27 +156,30 @@ class StaticBase(Resource):
                 self.instance.logger.info('done fetching')
 
         if preprocess:
-            preprocess = [
-                (file, file.path.parent / (file.path.name.rpartition('.')[0] + '.feather'))
-                for file in files
-            ]
-            preprocessing = [(file, path) for file, path in preprocess if not path.exists()]
-            if preprocessing:
-                paths = [path for file, path in preprocessing]
-                self.instance.logger.warning(f'Preprecessing {paths}; this may take a while.')
-                # TODO: Note: Illinois.geojson.zip is 1.35 GB, but expands in memory to about 5 GB
-                for file, path in preprocessing:
-                    gdf = self._from_file(file)
-                    t = time.time()
-                    self.instance.logger.info(f'serializing {file.path}')
-                    gdf.to_feather(path)
-                    self.instance.logger.info(f'{path.name} to {(time.time() - t) / 60} minutes to serialize.')
-
-            for file, path in preprocess:
-                file.path = path
+            # preprocess = [
+            #     (file, file.path.parent / (file.path.name.rpartition('.')[0] + '.feather'))
+            #     for file in files
+            # ]
+            # preprocessing = [(file, path) for file, path in preprocess if not path.exists()]
+            # if preprocessing:
+            #     paths = [path for file, path in preprocessing]
+            #     self.instance.logger.warning(f'Preprecessing {paths}; this may take a while.')
+            #     # TODO: Note: Illinois.geojson.zip is 1.35 GB, but expands in memory to about 5 GB
+            #     for file, path in preprocessing:
+            #         gdf = self._from_file(file)
+            #         t = time.time()
+            #         self.instance.logger.info(f'serializing {file.path}')
+            #         gdf.to_feather(path)
+            #         self.instance.logger.info(f'{path.name} to {(time.time() - t) / 60} minutes to serialize.')
+            for file in files:
+                if not file.preprocessed_path.exists():
+                    with logged_subprocess(self.instance.logger, f'Preprocessing {file.preprocessed_path.name}'):
+                        gdf = self._read_file(file.path)
+                        self.instance.logger.info(f'serializing {file.preprocessed_path.name}')
+                        gdf.to_feather(file.preprocessed_path)
 
         dfs: Union[Iterator[GeoDataFrame], Iterator[pd.DataFrame]] = (
-            self._from_file(file, bbox, columns)
+            self._read_file(file.preprocessed_path if preprocess else file.path, bbox, columns)
             for file in files
         )
         if len(files) > 1:
@@ -262,7 +246,7 @@ class StaticNaive(StaticBase):
         self.unzipped = unzipped
         self.columns = columns
         self._cache = None
-        self.preprocess = preprocess
+        self.ztpreprocess = preprocess
         self.name = name
         self.link = link
 
@@ -273,12 +257,11 @@ class StaticNaive(StaticBase):
         if self.instance is None:
             return self
         if self._cache is None:
-            self._cache = self._from_files(self.files, self.bbox)
+            self._cache = self._handle_files(self.files, self.bbox)
         return self._cache
 
-    @classmethod
-    def from_files(cls) -> GeoDataFrame:
-        return cls._from_files(cls.files)
+    def from_files(self) -> GeoDataFrame:
+        return self._handle_files(self.files)
 
     def __delete__(self, instance):
         self._cache = None
@@ -341,7 +324,7 @@ class StaticRegional(StaticBase, abc.ABC):
                     raise TypeError(item)
 
         files = list(gen())
-        return self._from_files(files, bbox=self.bbox)
+        return self._handle_files(files, bbox=self.bbox)
 
     def __init__(self):
         self.cache: WeakKeyDictionary[object, GeoDataFrame] = WeakKeyDictionary()

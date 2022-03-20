@@ -2,7 +2,7 @@ import itertools
 import logging
 import os
 from pathlib import Path
-from typing import Iterator
+from typing import Iterator, Optional, Type
 from typing import Union
 from weakref import WeakKeyDictionary
 
@@ -23,7 +23,10 @@ logger = IndentedLoggerAdapter(logger)
 class DescriptorAggregate:
     cache: WeakKeyDictionary[object, GeoDataFrame] = WeakKeyDictionary()
 
-    def __get__(self, instance, owner) -> Union[GeoDataFrame, 'DescriptorAggregate']:
+    def __get__(self, instance: Optional[object], owner: type) -> Union[GeoDataFrame, 'DescriptorAggregate']:
+        from validate_osm.compare.compare import Compare
+        instance: Optional[Compare]
+        owner: Type[Compare]
         self._instance = instance
         self._owner = owner
         if instance is None:
@@ -31,10 +34,9 @@ class DescriptorAggregate:
         if instance in self.cache:
             return self.cache[instance]
         path = self.path
-        if instance.ignore_file or not path.exists():
-            with logged_subprocess(logger, f'building {owner}.data'):
+        if 'aggregate' in instance.redo or not path.exists():
+            with logged_subprocess(logger, f'building {owner.__class__.__name__}.aggregate'):
                 agg = self.cache[instance] = self._aggregate()
-
             if not path.parent.exists():
                 os.makedirs(path.parent)
             with logged_subprocess(logger, f'serializing {owner}.data to {path}'):

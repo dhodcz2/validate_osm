@@ -4,6 +4,7 @@ import datetime
 import warnings
 from typing import Optional, Iterator, Iterable
 
+import buildingid.code
 import dateutil.parser
 import geopandas as gpd
 import numpy as np
@@ -11,14 +12,13 @@ import numpy.typing
 import pandas as pd
 from geopandas import GeoDataFrame
 
-import buildingid.code
 from validate_osm.source import data, Source, SourceOSM
 from validate_osm.source.aggregate import AggregateFactory
 from validate_osm.source.footprint import CallableFootprint
 
 
 class BuildingCallableFootprint(CallableFootprint):
-    def identity(self, gdf: GeoDataFrame) -> pd.Series:
+    def identify(self, gdf: GeoDataFrame) -> pd.Series:
         def ubid():
             warnings.filterwarnings('ignore', 'geographic CRS')
             centroid = gdf['centroid'].to_crs(4326)
@@ -202,19 +202,24 @@ class HeightAggregateFactory(AggregateFactory):
     def height_m(self):
         HEIGHT_TO_FLOOR_RATIO = 3.6
         data = self.groups.data
-        data['height_m'].update(
-            data.loc[data['height_m'].isna() & data['floors'].notna(), 'floors'] * HEIGHT_TO_FLOOR_RATIO
+        iloc = data.loc[data['height_m'].isna() & data['floors'].notna(), 'iloc']
+        iloc = set(iloc)
+        data['height_m'] = pd.Series((
+            floors * HEIGHT_TO_FLOOR_RATIO if i in iloc else height_m
+            for i, height_m, floors in data[['iloc', 'height_m', 'floors']].values
+        ), index=data.index, dtype=data['height_m'].dtype
         )
 
+        # TOOD: _grouped != data['iloc']
         def gen():
             yield from self.groups.ungrouped['height_m']
-            notna = data[data['height_m'].notna()].index
-            for i, gdf in enumerate(self.groups.grouped):
-                intersection = gdf.index.intersection(notna)
-                if not len(intersection):
+            notna = set(data.loc[data['height_m'].notna(), 'iloc'])
+            for i, group in enumerate(self.groups._grouped):
+                intersection = notna.intersection(group)
+                if not intersection:
                     yield np.nan
                 else:
-                    gdf = gdf.loc[intersection]
+                    gdf = data.iloc[iter(intersection)]
                     valid = zip(gdf.index, gdf['height_m'])
                     loc_max, max = next(valid)
                     for loc, height in valid:
@@ -225,6 +230,27 @@ class HeightAggregateFactory(AggregateFactory):
                     yield max
 
         return pd.Series(data=gen(), index=self.groups.index, dtype='Float64')
+
+        # def gen():
+        #     yield from self.groups.ungrouped['height_m']
+        #     # This doesn't work because duplicate indices but one entry might have NA
+        #     notna = data[data['height_m'].notna()].index
+        #     for i, gdf in enumerate(self.groups.grouped):
+        #         intersection = gdf.index.intersection(notna)
+        #         if not len(intersection):
+        #             yield np.nan
+        #         else:
+        #             gdf = gdf.loc[intersection]
+        #             valid = zip(gdf.index, gdf['height_m'])
+        #             loc_max, max = next(valid)
+        #             for loc, height in valid:
+        #                 if height > max:
+        #                     loc_max = loc
+        #                     max = height
+        #             self.index_max_height[i] = loc_max
+        #             yield max
+
+        # return pd.Series(data=gen(), index=self.groups.index, dtype='Float64')
 
     def floors(self):
 

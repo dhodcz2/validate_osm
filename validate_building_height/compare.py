@@ -45,8 +45,10 @@ CompareRio: Type[Compare] = partial(
 2022-03-18 03:09:17,297 - INFO - reading Building Footprints (current).feather
 2022-03-18 03:09:24,854 - INFO - Building Footprints (current).geojson took 0.1259451150894165 minutes to load."""
 
+# TODO: Check why it says loading .geojson and not .feather
+
 if __name__ == '__main__':
-    compare = CompareChicago(ignore_file=True, debug=True)
+    compare = CompareChicago(debug=True)
     compare.data
     compare.aggregate
     print()

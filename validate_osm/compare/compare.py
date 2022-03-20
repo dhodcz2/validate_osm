@@ -1,13 +1,12 @@
 import functools
-from python_log_indenter import IndentedLoggerAdapter
 import inspect
 import logging
-import sys
 from pathlib import Path
-from typing import Union, Iterable, Type, Hashable, Optional
+from typing import Union, Iterable, Type, Hashable, Optional, Iterator
 
 import geopandas as gpd
 from geopandas import GeoDataFrame
+from python_log_indenter import IndentedLoggerAdapter
 
 from validate_osm.compare.aggregate import DescriptorAggregate
 from validate_osm.compare.data import DescriptorData
@@ -16,8 +15,6 @@ from validate_osm.source.footprint import CallableFootprint
 from validate_osm.source.source import (
     Source, BBox
 )
-from validate_osm.args import global_args
-
 
 
 class Compare:
@@ -27,11 +24,12 @@ class Compare:
     batch: Union[GeoDataFrame]
     sources: dict[str, Source]
 
+    # TODO: How best can the user specify which files are to be redone?
     def __init__(
             self,
             bbox: BBox,
             *sources: Type[Source] | Iterable[Type[Source]],
-            ignore_file=False,
+            redo: Union[None, str, Iterable, bool] = None,
             debug: bool = False,
             verbose: bool = False,
     ):
@@ -46,7 +44,6 @@ class Compare:
             source.name: source()
             for source in sources
         }
-        self.ignore_file = ignore_file
 
         if bbox is not None:
             for source in self.sources.values():
@@ -67,21 +64,51 @@ class Compare:
         self.logger = logger
         for source in self.sources.values():
             source.logger = self.logger
+        self.redo = redo
 
     @property
+    def redo(self):
+        return self._redo
+
+    @redo.setter
+    def redo(self, names: Union[None, str, Iterable]):
+        if names is None or names is False:
+            self._redo = {}
+        elif isinstance(names, str):
+            self._redo = frozenset((names,))
+        elif isinstance(names, Iterable):
+            self._redo = frozenset(names)
+        elif names is True:
+            self._redo = {'data', 'footprint', 'aggregate', *self.sources.keys()}
+        else:
+            raise TypeError(names)
+        for name, source in self.sources.items():
+            source.ignore_file = name in self._redo
+
+    @redo.deleter
+    def redo(self):
+        self._redo = {}
+
+    @functools.cached_property
     def footprint(self) -> CallableFootprint:
-        if self._footprint is None:
-            raise RuntimeError(f"Compare.footprint is dependent upon Compare.data; first, instantiate Compare.data")
-        return self._footprint
+        sources = self.sources.values()
+        footprints: Iterator[tuple[Type[CallableFootprint], Source]] = zip(
+            (source.footprint for source in sources), sources
+        )
+        footprint, source = next(footprints)
+        for other_footprint, other_source in footprints:
+            if other_footprint is not footprint:
+                raise ValueError(f"{source.__class__.__name__}.footprint!={other_source.__class__.name}.footprint")
 
-    @footprint.setter
-    def footprint(self, value):
-        self._footprint = value
+        return footprint(self)
 
-    @footprint.deleter
-    def footprint(self):
-        logging.warning(f'footprints cannot be regenerated until compare.data is regenerated')
-        del self._footprint
+    @property
+    def footprints(self) -> GeoDataFrame:
+        return self.footprint.footprints
+
+    @footprints.deleter
+    def footprints(self):
+        del self.footprint.footprints
 
     @functools.cached_property
     def names(self) -> list[str]:
@@ -201,3 +228,19 @@ class Compare:
         :param name: Name of the Source that is tested for overlap with others 
         :return: 
         """
+
+
+"""
+1.  Compare.data
+    data
+    with self:
+        with compare.footprint as footprint:
+            data = footprint(data)
+        self._data = data
+        
+    with compare.footprint as footprint:
+        return footprint(data)
+        
+2.  Compare.footprint
+        compare.data
+"""

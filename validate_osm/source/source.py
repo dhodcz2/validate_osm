@@ -139,6 +139,20 @@ class Source(abc.ABC, metaclass=SourceMeta):
     resource: Union[StaticBase, pd.DataFrame, gpd.GeoDataFrame]
     ignore_file = False
 
+    @property
+    def ignore_file(self):
+        return self._ignore_file
+
+    @ignore_file.setter
+    def ignore_file(self, val: bool):
+        if not isinstance(val, bool):
+            raise TypeError(val)
+        self._ignore_file = val
+
+    @ignore_file.deleter
+    def ignore_file(self):
+        self._ignore_file = False
+
     @classmethod
     @property
     def name(cls) -> str:
