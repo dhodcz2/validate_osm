@@ -50,7 +50,6 @@ class File:
         return f'{size:.1f} {unit}'
 
 
-
 def empty_dir(path: Path) -> bool:
     return True if next(path.iterdir(), None) is None else False
 
@@ -103,13 +102,14 @@ class StaticBase(Resource):
             self,
             path: Path,
             bbox: Optional[shapely.geometry.Polygon] = None,
-            debug=False
+            debug=False,
+            timed=True
             # columns: Optional[list[str]] = None
     ) -> Union[pd.DataFrame, GeoDataFrame]:
         from validate_osm.source.source import Source
         self.instance: Source
         gdf: Union[GeoDataFrame, pd.DataFrame]
-        with logged_subprocess(self.instance.logger, f'reading {path}'):
+        with logged_subprocess(self.instance.logger, f'reading {path} ({File.size(path)})', timed=timed):
             match path.name.rpartition('.')[2]:
                 case 'feather':
                     try:
@@ -169,30 +169,18 @@ class StaticBase(Resource):
                 self.instance.logger.info('done fetching')
 
         if preprocess:
-            # preprocess = [
-            #     (file, file.path.parent / (file.path.name.rpartition('.')[0] + '.feather'))
-            #     for file in files
-            # ]
-            # preprocessing = [(file, path) for file, path in preprocess if not path.exists()]
-            # if preprocessing:
-            #     paths = [path for file, path in preprocessing]
-            #     self.instance.logger.warning(f'Preprecessing {paths}; this may take a while.')
-            #     # TODO: Note: Illinois.geojson.zip is 1.35 GB, but expands in memory to about 5 GB
-            #     for file, path in preprocessing:
-            #         gdf = self._from_file(file)
-            #         t = time.time()
-            #         self.instance.logger.info(f'serializing {file.path}')
-            #         gdf.to_feather(path)
-            #         self.instance.logger.info(f'{path.name} to {(time.time() - t) / 60} minutes to serialize.')
             for file in files:
                 if not file.preprocessed_path.exists():
-                    with logged_subprocess(self.instance.logger, f'Preprocessing {file.preprocessed_path.name}'):
-                        gdf = self._read_file(file.path)
+                    with logged_subprocess(self.instance.logger, f'preprocessing {file.preprocessed_path.name}'):
+                        gdf = self._read_file(file.path, bbox, timed=True, )
                         self.instance.logger.info(f'serializing {file.preprocessed_path.name}')
                         gdf.to_feather(file.preprocessed_path)
 
         dfs: Union[Iterator[GeoDataFrame], Iterator[pd.DataFrame]] = (
-            self._read_file(file.preprocessed_path if preprocess else file.path, bbox, columns)
+            self._read_file(file.preprocessed_path, bbox, timed=True)
+            for file in files
+        ) if preprocess else (
+            self._read_file(file.path, bbox, timed=True)
             for file in files
         )
         if len(files) > 1:

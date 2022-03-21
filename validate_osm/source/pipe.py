@@ -56,7 +56,7 @@ class DescriptorPipeSerialize(DescriptorPipe, abc.ABC):
         if not instance.ignore_file and path.exists():
             with logged_subprocess(
                     instance.logger,
-                    f'reading {owner.__name__}.{self.name} from {path} ({File.size(path)})'
+                    f'reading {owner.__name__}.{self.name} from {path} ({File.size(path)})',
             ):
                 data = self._cache[instance] = gpd.read_feather(path)
                 return data

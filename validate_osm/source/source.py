@@ -60,7 +60,6 @@ class BBox:
             raise TypeError(ellipsoidal_4326_bbox)
         cartesian = shapely.geometry.Polygon(((y, x) for (x, y) in ellipsoidal.exterior.coords))
         self.data = BBoxStruct(ellipsoidal, cartesian, crs='epsg:4326')
-
     def __get__(self, instance, owner):
         self._instance: Source = instance
         self._owner: Type[Source] = owner
@@ -71,6 +70,7 @@ class BBox:
 
     def __str__(self):
         return self.data.__str__()
+
 
     # @property
     # def resource(self) -> BBoxStruct:

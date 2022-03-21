@@ -53,7 +53,6 @@ CompareRio: Type[Compare] = partial(
 if __name__ == '__main__':
     # compare = CompareChicago(debug=True, redo=['data', 'footprint', ])
     # compare = CompareChicago(debug=True, redo=['data', 'footprint', ])
-    compare = CompareChicago(debug=True)
-    compare.data
-    compare.aggregate
+    compare = CompareChicago(debug=True, redo=['data', 'footprint', 'aggregate'])
+    compare.plot.matches()
     print()

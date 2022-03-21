@@ -44,6 +44,7 @@ class DescriptorAggregate:
                 agg = self.cache[instance] = gpd.read_feather(self.path)
                 return agg
 
+    # TODO: Perhaps clean up this process a bit; it seems like it can be simplified with regards to dunder methods
     @property
     def factory(self) -> AggregateFactory:
         sources = self._instance.sources.values()
@@ -56,13 +57,13 @@ class DescriptorAggregate:
             if other_factory.__class__ is not factory.__class__:
                 raise ValueError(f"{source.__class__.__name__}.factory!={other_source.__class__.name}.factory")
         self._instance.logger.debug(f'using {factory.__name__}')
-        return factory(self._instance)
+        return factory
 
     def __enter__(self):
-        # agg = self.cache[self._instance] = self.factory(self._instance)
-        # return agg
-        with self.factory as aggregate:
-            self.cache[self._instance] = aggregate
+        # with self.factory as aggregate:
+        #     self.cache[self._instance] = aggregate
+        # return aggregate
+        aggregate = self.cache[self._instance] = self.factory(self._instance)
         return aggregate
 
     def __exit__(self, exc_type, exc_val, exc_tb):

@@ -88,11 +88,16 @@ class AggregateFactory:
         })
         result = result.sort_index(axis=0)
         result['iloc'] = range(len(result))
+        inval = result[result['geometry'].isna() | result['centroid'].isna()].index
+        if len(inval):
+            self._compare.logger.warning(f'no geom: {inval}')
+            result = result[result['geometry'].notna()]
         result['geometry'] = result['geometry'].to_crs(3857)
         result['centroid'] = result['centroid'].to_crs(3857)
         return result
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+
         ...
 
 

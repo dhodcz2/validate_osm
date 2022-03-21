@@ -50,7 +50,10 @@ class DescriptorPlot:
         # Assign a color and hatch to every unique UBID
         lenc = len(COLORS)
         lenh = len(HATCHES)
-        groups = agg.groupby('ubid').groups.values()
+        groups = pd.MultiIndex.from_tuples(
+            itertools.chain.from_iterable(agg.groupby('ubid').groups.values()),
+            names=['ubid', 'name']
+        )
         agg['color'] = pd.Series((
             COLORS[i % lenc]
             for i, group in enumerate(groups)

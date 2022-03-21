@@ -1,4 +1,5 @@
 import dataclasses
+import logging
 import os
 from pathlib import Path
 from typing import Generator, Union, Type, Any
@@ -54,7 +55,11 @@ class DescriptorData:
         # TODO: Perhaps if there is a file with a bbox that contains instance.bbox, load
         #   that bbox, .within it,
         if path.exists() and 'data' not in instance.redo:
-            with logged_subprocess(instance.logger, f'reading {instance.name}.data from {path} ({File.size(path)})'):
+            with logged_subprocess(
+                    instance.logger,
+                    f'reading {instance.name}.data from {path} ({File.size(path)})',
+                    timed=False
+            ):
                 data = self.cache[instance] = gpd.read_feather(path)
         else:
             with logged_subprocess(instance.logger, f'building {instance.name}.data'), self as data:
@@ -86,17 +91,18 @@ class DescriptorData:
                     data['group'] = np.nan
                 data = data.set_index(['name', 'id', 'group'], drop=True)
                 yield data
-                self._instance.logger.debug(f'deleting {source.resource.__class__.__name__}')
+                self._instance.logger.debug(f'deleting {source.name}.resource')
                 del source.data
 
         with logged_subprocess(self._instance.logger, f'concatenating {self._instance.name}.data', ):
             data = concat(datas())
 
         # TODO: Investigate how these invalid geometries came to be
-        inval = data[data['geometry'].isna() | data['centroid'].isna()].index
-        if len(inval):
-            self._instance.logger.warning(f'no geom: {inval}')
-            data = data.drop(index=inval)
+        inval = data['geometry'].isna() | data['centroid'].isna()
+        if any(inval):
+            msg = ', '.join(str(tuple) for tuple in data[inval].index)
+            self._instance.logger.warning(f'invalid geometry: {msg}')
+            data = data[~inval]
 
         data['geometry'] = data['geometry'].to_crs(3857)
         data['centroid'] = data['centroid'].to_crs(3857)
@@ -111,7 +117,11 @@ class DescriptorData:
             path = self.path
             if not path.parent.exists():
                 os.makedirs(path.parent)
-            with logged_subprocess(self._instance.logger, f'serializing {self._owner.__name__}.data {path}'):
+            with logged_subprocess(
+                    self._instance.logger,
+                    f'serializing {self._owner.__name__}.data {path}',
+                    timed=False
+            ):
                 data.to_feather(path)
 
     def __delete__(self, instance):

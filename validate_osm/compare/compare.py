@@ -1,4 +1,5 @@
 import functools
+from validate_osm.source.source import BBox
 import inspect
 import logging
 from pathlib import Path
@@ -68,6 +69,7 @@ class Compare:
         self.redo = redo
         self.serialize = serialize
 
+
     @property
     def redo(self):
         return self._redo
@@ -121,8 +123,25 @@ class Compare:
     def __repr__(self):
         return f'{self.__class__.__name__}{self.name}'
 
-    def __getitem__(self, item: str) -> Source:
-        return self.sources[item]
+
+    # def __getitem__(self, items) -> 'Compare':
+    #     if not isinstance(items, tuple):
+    #         items = (items,)
+    #     agg = self.aggregate
+    #     names = [
+    #         item for item in items
+    #         if isinstance(item, str)
+    #     ]
+    #
+    #
+    #     for item in items:
+    #
+    #         if isinstance(item, BBox):
+    #             ...
+    #         elif is
+    #
+
+
 
     @functools.cached_property
     def directory(self) -> Path:
