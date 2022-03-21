@@ -15,85 +15,97 @@ from networkx.algorithms.components.connected import connected_components
 from validate_osm.source.pipe import DescriptorPipe
 
 
+#
+#
+# @dataclasses.dataclass
+# class Groups:
+#     data: GeoDataFrame = dataclasses.field(repr=False)
+#     grouped: Collection[Collection[int]]
+#     _grouped: Collection[Collection[int]] = dataclasses.field(init=False, repr=False)
+#     ungrouped: Collection[int]
+#     _ungrouped: Collection[int] = dataclasses.field(init=False, repr=False)
+#
+#     @property
+#     def grouped(self) -> list[GeoDataFrame]:
+#         return [
+#             self.data.iloc[group]
+#             for group in self._grouped
+#         ]
+#
+#     @grouped.setter
+#     def grouped(self, value):
+#         self._grouped = [
+#             list(v) for v in value
+#         ]
+#
+#     @property
+#     def ungrouped(self) -> GeoDataFrame:
+#         return self.data.iloc[self._ungrouped]
+#
+#     @ungrouped.setter
+#     def ungrouped(self, value):
+#         self._ungrouped = list(value)
+#
+#     @functools.cached_property
+#     def index(self):
+#         # index_ungrouped = [
+#         #     tuple[:2]
+#         #     for tuple in self.data.iloc[self._ungrouped].index
+#         # ]
+#         # index = self.data.index
+#         # members = (
+#         #     group[0]
+#         #     for group in self._grouped
+#         # )
+#         # index_grouped = [
+#         #     index[member][:-2]
+#         #     for member in members
+#         # ]
+#         # return pd.MultiIndex.from_tuples(
+#         #     itertools.chain(index_ungrouped, index_grouped),
+#         #     names=self.data.index.names[:2]
+#         # )
+#         ungrouped: pd.MultiIndex = self.data.iloc[self._ungrouped].index
+#         index_ungrouped = zip(ungrouped.get_level_values('ubid'), ungrouped.get_level_values('name'))
+#         # grouped = self.grouped
+#         # first = [grouped.iloc[0] for group in grouped]
+#         first_indices = [
+#             df.index[0]
+#             for df in self.grouped
+#         ]
+#         index_grouped = zip((idx[0] for idx in first_indices), (idx[1] for idx in first_indices))
+#         # grouped: pd.MultiIndex = self.data.iloc[itertools.chain.from_iterable(self._grouped)].index
+#         # index_grouped = zip(grouped.get_level_values('ubid'), grouped.get_level_values('name'))
+#         return pd.MultiIndex.from_tuples(itertools.chain(index_ungrouped, index_grouped), names=['ubid', 'name'])
+
+
 @dataclasses.dataclass
 class Groups:
     data: GeoDataFrame = dataclasses.field(repr=False)
-    grouped: Collection[Collection[int]]
-    _grouped: Collection[Collection[int]] = dataclasses.field(init=False, repr=False)
-    ungrouped: Collection[int]
-    _ungrouped: Collection[int] = dataclasses.field(init=False, repr=False)
-
-    @property
-    def grouped(self) -> list[GeoDataFrame]:
-        return [
-            self.data.iloc[group]
-            for group in self._grouped
-        ]
-
-    @grouped.setter
-    def grouped(self, value):
-        self._grouped = [
-            list(v) for v in value
-        ]
-
-    @property
-    def ungrouped(self) -> GeoDataFrame:
-        return self.data.iloc[self._ungrouped]
-
-    @ungrouped.setter
-    def ungrouped(self, value):
-        self._ungrouped = list(value)
-
-    # @functools.cached_property
-    # def index_grouped(self) -> list[tuple]:
-    #     index = self.data.index
-    #     members = (
-    #         group[0]
-    #         for group in self._grouped
-    #     )
-    #     return [
-    #         index[member][:-2]
-    #         for member in members
-    #     ]
-    #
-    # @functools.cached_property
-    # def index_ungrouped(self) -> list[tuple]:
-    #     return [
-    #         tuple[:2]
-    #         for tuple in self.data.iloc[self._ungrouped].index
-    #
-    #     ]
+    iloc_grouped: Collection[Collection[int]]
+    iloc_ungrouped: Collection[int]
 
     @functools.cached_property
-    def index(self):
-        # index_ungrouped = [
-        #     tuple[:2]
-        #     for tuple in self.data.iloc[self._ungrouped].index
-        # ]
-        # index = self.data.index
-        # members = (
-        #     group[0]
-        #     for group in self._grouped
-        # )
-        # index_grouped = [
-        #     index[member][:-2]
-        #     for member in members
-        # ]
-        # return pd.MultiIndex.from_tuples(
-        #     itertools.chain(index_ungrouped, index_grouped),
-        #     names=self.data.index.names[:2]
-        # )
-        ungrouped: pd.MultiIndex = self.data.iloc[self._ungrouped].index
-        index_ungrouped = zip(ungrouped.get_level_values('ubid'), ungrouped.get_level_values('name'))
-        # grouped = self.grouped
-        # first = [grouped.iloc[0] for group in grouped]
-        first_indices = [
-            df.index[0]
-            for df in self.grouped
+    def grouped(self) -> list[GeoDataFrame]:
+        return [
+            self.data.iloc[iter(iloc)]
+            for iloc in self.iloc_grouped
         ]
-        index_grouped = zip((idx[0] for idx in first_indices), (idx[1] for idx in first_indices))
-        # grouped: pd.MultiIndex = self.data.iloc[itertools.chain.from_iterable(self._grouped)].index
-        # index_grouped = zip(grouped.get_level_values('ubid'), grouped.get_level_values('name'))
+
+    @functools.cached_property
+    def ungrouped(self) -> GeoDataFrame:
+        return self.data.iloc[iter(self.iloc_ungrouped)]
+
+    @functools.cached_property
+    def index(self) -> pd.MultiIndex:
+        ungrouped: pd.MultiIndex = self.ungrouped.index
+        index_ungrouped = zip(ungrouped.get_level_values('ubid'), ungrouped.get_level_values('name'))
+        ilocs = [
+            next(iter(iloc))
+            for iloc in self.iloc_grouped
+        ]
+        grouped: pd.MultiIndex = self.data.iloc[ilocs].index
+        index_grouped = zip(grouped.get_level_values('ubid'), grouped.get_level_values('name'))
         return pd.MultiIndex.from_tuples(itertools.chain(index_ungrouped, index_grouped), names=['ubid', 'name'])
 
 
@@ -227,7 +239,3 @@ class DescriptorGroup(DescriptorPipe):
 
     def __set__(self, instance, value):
         self._cache[instance] = value
-
-
-
-

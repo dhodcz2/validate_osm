@@ -144,7 +144,7 @@ class CallableFootprint:
         # if self.compare not in self.compare.__class__.data.cache:
         #     _ = self.compare.data  # Compare.data constructs compare.footprints in the process
         #     return self._footprints
-        if 'footprint' not in self.compare.redo and self.path.exists():
+        if 'footprint' not in self.compare.redo and 'footprints' not in self.compare.redo and self.path.exists():
             with logged_subprocess(self.compare.logger, f'reading footprints from {self.path}'):
                 footprints = self._footprints = gpd.read_feather(self.path)
                 return footprints
@@ -249,6 +249,7 @@ class CallableFootprint:
         footprints['geometry'] = footprints['geometry'].to_crs(3857)
         footprints['centroid'] = footprints['centroid'].to_crs(3857)
 
+        # TODO: Where is iloc applied and sorted?
         identity = self.identify(footprints)
         footprints = footprints.set_index(identity)
         self.compare.logger.debug(f'identified footprints with {identity.name=}')

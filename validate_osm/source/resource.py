@@ -37,6 +37,19 @@ class File:
     def preprocessed_path(self) -> Path:
         return self.path.parent / (self.path.name.rpartition('.')[0] + '.feather')
 
+    @staticmethod
+    def size(path: Path) -> str:
+        size = os.path.getsize(path) / 1024
+        unit = 'KB'
+        if size > 1024:
+            size = size / 1024
+            unit = 'MB'
+        if size > 1024:
+            size = size / 1024
+            unit = 'GB'
+        return f'{size:.1f} {unit}'
+
+
 
 def empty_dir(path: Path) -> bool:
     return True if next(path.iterdir(), None) is None else False

@@ -192,6 +192,7 @@ class HeightAggregateFactory(AggregateFactory):
         super(HeightAggregateFactory, self).__init__(*args, **kwargs)
         self.index_max_height: dict[int, int] = {}
         self.index_max_floors: dict[int, int] = {}
+        self.index_max = collections.ChainMap(self.index_max_height, self.index_max_floors)
 
     def __call__(self, *args, **kwargs):
         obj = super(HeightAggregateFactory, self).__call__(*args, **kwargs)
@@ -201,7 +202,7 @@ class HeightAggregateFactory(AggregateFactory):
 
     def height_m(self):
         HEIGHT_TO_FLOOR_RATIO = 3.6
-        data = self.groups.data
+        data = self._groups.data
         iloc = data.loc[data['height_m'].isna() & data['floors'].notna(), 'iloc']
         iloc = set(iloc)
         data['height_m'] = pd.Series((
@@ -209,101 +210,81 @@ class HeightAggregateFactory(AggregateFactory):
             for i, height_m, floors in data[['iloc', 'height_m', 'floors']].values
         ), index=data.index, dtype=data['height_m'].dtype
         )
+        index_max_height = self.index_max_height
 
-        # TOOD: _grouped != data['iloc']
         def gen():
-            yield from self.groups.ungrouped['height_m']
+            yield from self._groups.ungrouped['height_m']
             notna = set(data.loc[data['height_m'].notna(), 'iloc'])
-            for i, group in enumerate(self.groups._grouped):
+            for i, group in enumerate(self._groups.iloc_grouped):
                 intersection = notna.intersection(group)
                 if not intersection:
                     yield np.nan
                 else:
                     gdf = data.iloc[iter(intersection)]
-                    valid = zip(gdf.index, gdf['height_m'])
-                    loc_max, max = next(valid)
+                    valid = zip(gdf['iloc'], gdf['height_m'])
+                    iloc_max, max = next(valid)
                     for loc, height in valid:
                         if height > max:
-                            loc_max = loc
+                            iloc_max = loc
                             max = height
-                    self.index_max_height[i] = loc_max
+                    index_max_height[i] = iloc_max
                     yield max
 
-        return pd.Series(data=gen(), index=self.groups.index, dtype='Float64')
-
-        # def gen():
-        #     yield from self.groups.ungrouped['height_m']
-        #     # This doesn't work because duplicate indices but one entry might have NA
-        #     notna = data[data['height_m'].notna()].index
-        #     for i, gdf in enumerate(self.groups.grouped):
-        #         intersection = gdf.index.intersection(notna)
-        #         if not len(intersection):
-        #             yield np.nan
-        #         else:
-        #             gdf = gdf.loc[intersection]
-        #             valid = zip(gdf.index, gdf['height_m'])
-        #             loc_max, max = next(valid)
-        #             for loc, height in valid:
-        #                 if height > max:
-        #                     loc_max = loc
-        #                     max = height
-        #             self.index_max_height[i] = loc_max
-        #             yield max
-
-        # return pd.Series(data=gen(), index=self.groups.index, dtype='Float64')
+        return pd.Series(data=gen(), index=self._groups.index, dtype='Float64')
 
     def floors(self):
+        index_max_floors = self.index_max_floors
+        data = self._groups.data
 
         def gen():
-            yield from self.groups.ungrouped['floors']
-            data = self.groups.data
-            notna = data[data['floors'].notna()].index
-            for i, gdf in enumerate(self.groups.grouped):
-                intersection = gdf.index.intersection(notna)
-                if not len(intersection):
+            yield from self._groups.ungrouped['floors']
+            notna = set(data.loc[data['floors'].notna(), 'iloc'])
+            for i, group in enumerate(self._groups.iloc_grouped):
+                intersection = notna.intersection(group)
+                if not intersection:
                     yield np.nan
                 else:
-                    gdf = gdf.loc[intersection]
-                    valid = zip(gdf.index, gdf['floors'])
-                    loc_max, max = next(valid)
-                    for loc, floors in valid:
-                        if floors > max:
-                            loc_max = loc
-                            max = floors
-                    self.index_max_floors[i] = loc_max
+                    gdf = data.iloc[iter(intersection)]
+                    valid = zip(gdf['iloc'], gdf['floors'])
+                    iloc_max, max = next(valid)
+                    for loc, height in valid:
+                        if height > max:
+                            iloc_max = loc
+                            max = height
+                    index_max_floors[i] = iloc_max
                     yield max
 
-        return pd.Series(data=gen(), index=self.groups.index, dtype='Float64')
+        return pd.Series(data=gen(), index=self._groups.index, dtype='Float64')
 
     def timestamp(self):
         def gen():
-            yield from self.groups.ungrouped['timestamp']
-            index_max = collections.ChainMap(self.index_max_height, self.index_max_floors)
+            yield from self._groups.ungrouped['timestamp']
+            series: pd.Series = self._groups.data['timestamp']
+            index_max = self.index_max
             yield from (
-                gdf.loc[index_max[i], 'timestamp',]
-                if i in index_max
-                else pd.NaT
-                for i, gdf in enumerate(self.groups.grouped)
+                series.iat[index_max[i]]
+                if i in index_max else np.nan
+                for i in range(len(self._groups.iloc_grouped))
             )
 
-        return pd.Series(data=gen(), index=self.groups.index, dtype='datetime64[ns]')
+        return pd.Series(data=gen(), index=self._groups.index, dtype='datetime64[ns]')
 
     def start_date(self):
         def gen():
-            yield from self.groups.ungrouped['start_date']
-            index_max = collections.ChainMap(self.index_max_height, self.index_max_floors)
+            yield from self._groups.ungrouped['start_date']
+            series: pd.Series = self._groups.data['start_date']
+            index_max = self.index_max
             yield from (
-                gdf.loc[index_max[i], 'start_date']
-                if i in index_max
-                else pd.NaT
-                for i, gdf in enumerate(self.groups.grouped)
+                series.iat[index_max[i]]
+                if i in index_max else np.nan
+                for i in range(len(self._groups.iloc_grouped))
             )
 
-        return pd.Series(data=gen(), index=self.groups.index, dtype='datetime64[ns]')
+        return pd.Series(data=gen(), index=self._groups.index, dtype='datetime64[ns]')
 
 
 class Height(BuildingSource):
-    aggregate_factory = HeightAggregateFactory()
+    aggregate_factory = HeightAggregateFactory
 
     @data.validate('Float64')
     @abc.abstractmethod

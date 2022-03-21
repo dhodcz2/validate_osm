@@ -32,6 +32,7 @@ class Compare:
             redo: Union[None, str, Iterable, bool] = None,
             debug: bool = False,
             verbose: bool = False,
+            serialize: bool = True
     ):
         if isinstance(sources, Source):
             sources = (sources,)
@@ -65,6 +66,7 @@ class Compare:
         for source in self.sources.values():
             source.logger = self.logger
         self.redo = redo
+        self.serialize = serialize
 
     @property
     def redo(self):
@@ -111,20 +113,20 @@ class Compare:
         del self.footprint.footprints
 
     @functools.cached_property
-    def names(self) -> list[str]:
+    def name(self) -> str:
         names = list(self.sources.keys())
         names.sort()
-        return names
+        return '_'.join(names)
 
     def __repr__(self):
-        return f'{self.__class__.__name__}{self.names}'
+        return f'{self.__class__.__name__}{self.name}'
 
     def __getitem__(self, item: str) -> Source:
         return self.sources[item]
 
     @functools.cached_property
     def directory(self) -> Path:
-        return Path(inspect.getfile(self.__class__)).parent / '_'.join(self.names)
+        return Path(inspect.getfile(self.__class__)).parent / self.name
 
     def matched(self, name: Union[None, Hashable, Iterable[Hashable]] = None) -> GeoDataFrame:
         """
@@ -194,7 +196,7 @@ class Compare:
         else:
             raise TypeError(name)
 
-    def overlap(self, name: Hashable, others: Optional[Hashable] = None) -> GeoDataFrame:
+    def percent_overlap(self, name: Hashable, others: Optional[Hashable] = None) -> GeoDataFrame:
         """
         Returns a GeoDataFrame where intersection = % overlap of the name's entries compared with others
         :param name:

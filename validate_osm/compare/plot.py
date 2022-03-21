@@ -72,7 +72,7 @@ class DescriptorPlot:
     def matched(self, name: Hashable, others: Optional[Hashable] = None):
         from validate_osm.compare.compare import Compare
         self._instance: Compare
-        gdf = self._instance.overlap(name, others)
+        gdf = self._instance.percent_overlap(name, others)
         ax = gdf.plot(cmap='RdYlGn', column='intersection')
         for centroid, iloc in zip(gdf['centroid'], gdf['iloc']):
             ax.annotate(str(iloc), xy=(float(centroid.x), float(centroid.y)))

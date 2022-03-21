@@ -132,7 +132,7 @@ class Source(abc.ABC, metaclass=SourceMeta):
     data: Union[DescriptorData, GeoDataFrame] = DescriptorData()
     footprint: Type[CallableFootprint] = CallableFootprint
     # groups: Union[Groups, DescriptorGroup] = DescriptorGroup()
-    aggregate_factory: AggregateFactory = AggregateFactory()
+    aggregate_factory: Type[AggregateFactory] = AggregateFactory
     name: str
     link: str
     bbox: BBox

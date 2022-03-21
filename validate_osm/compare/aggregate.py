@@ -1,23 +1,23 @@
 import itertools
+from validate_osm.source.resource import File
 import logging
 import os
 from pathlib import Path
-from typing import Iterator, Optional, Type
+from typing import Iterator, Optional, Type, Collection
 from typing import Union
 from weakref import WeakKeyDictionary
 
 import geopandas as gpd
+import networkx
 import pandas as pd
 from geopandas import GeoDataFrame
+from networkx import connected_components
 from python_log_indenter import IndentedLoggerAdapter
 
 from validate_osm.source.aggregate import AggregateFactory
 from validate_osm.source.groups import Groups
 from validate_osm.source.source import Source
 from validate_osm.util.scripts import logged_subprocess
-
-logger = logging.getLogger(__name__.partition('.')[0])
-logger = IndentedLoggerAdapter(logger)
 
 
 class DescriptorAggregate:
@@ -35,41 +35,19 @@ class DescriptorAggregate:
             return self.cache[instance]
         path = self.path
         if 'aggregate' in instance.redo or not path.exists():
-            with logged_subprocess(logger, f'building {owner.__class__.__name__}.aggregate'):
-                agg = self.cache[instance] = self._aggregate()
-            if not path.parent.exists():
-                os.makedirs(path.parent)
-            with logged_subprocess(logger, f'serializing {owner}.data to {path}'):
-                agg.to_feather(path)
+            with logged_subprocess(instance.logger, f'building {instance.name}.aggregate'), self as aggregate:
+                return aggregate
         else:
-            with logged_subprocess(logger, f'reading {owner}.aggregate from {path}'):
+            with logged_subprocess(
+                    instance.logger, f'reading {instance.name}.aggregate from {path} ({File.size(path)})'
+            ):
                 agg = self.cache[instance] = gpd.read_feather(self.path)
-        return agg
+                return agg
 
-    def _groups(self) -> Groups:
-        data = self._instance.data
-        iloc = pd.Series(range(len(data)), index=data.index)
-        names = iloc.index.unique('name')
-        index = self._instance.footprint.footprints.index.name
-
-        def groups():
-            # For each unique name, group all matches of UBID, relation, or way
-            for name in names:
-                iloc_frag = iloc.xs(name, level='name')
-                yield from (
-                    iloc_frag.iloc[group].values
-                    for group in iloc_frag.groupby(index).indices.values()
-                    if len(group) > 1
-                )
-
-        grouped = list(groups())
-        ungrouped = set(iloc.values).difference(itertools.chain.from_iterable(grouped))
-        return Groups(data.copy(), grouped, ungrouped)
-
-    def _aggregate(self) -> gpd.GeoDataFrame:
-        groups = self._groups()
+    @property
+    def factory(self) -> AggregateFactory:
         sources = self._instance.sources.values()
-        factories: Iterator[tuple[AggregateFactory, Source]] = zip(
+        factories: Iterator[tuple[Type[AggregateFactory], Source]] = zip(
             (source.aggregate_factory for source in sources),
             sources
         )
@@ -77,11 +55,26 @@ class DescriptorAggregate:
         for other_factory, other_source in factories:
             if other_factory.__class__ is not factory.__class__:
                 raise ValueError(f"{source.__class__.__name__}.factory!={other_source.__class__.name}.factory")
-        result = factory(groups)
-        result['iloc'] = range(len(result))
-        result['geometry'] = result['geometry'].to_crs(3857)
-        result['centroid'] = result['centroid'].to_crs(3857)
-        return result
+        self._instance.logger.debug(f'using {factory.__name__}')
+        return factory(self._instance)
+
+    def __enter__(self):
+        # agg = self.cache[self._instance] = self.factory(self._instance)
+        # return agg
+        with self.factory as aggregate:
+            self.cache[self._instance] = aggregate
+        return aggregate
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        from validate_osm.compare.compare import Compare
+        self._instance: Compare
+        agg = self.cache[self._instance]
+        if self._instance.serialize:
+            path = self.path
+            if not path.parent.exists():
+                os.makedirs(path.parent)
+            with logged_subprocess(self._instance.logger, f'serializing {self._instance.name}.aggregate to {path}'):
+                agg.to_feather(path)
 
     def __delete__(self, instance):
         if instance in self.cache:
@@ -91,8 +84,4 @@ class DescriptorAggregate:
     def path(self) -> Path:
         from validate_osm.compare.compare import Compare
         self._instance: Compare
-        return (
-                self._instance.directory /
-                self.__class__.__name__ /
-                f'{str(self._instance.bbox)}.feather'
-        )
+        return self._instance.directory / str(self._instance.bbox) / 'aggregate.feather'

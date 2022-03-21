@@ -6,6 +6,8 @@ from typing import DefaultDict, Type, Union
 from weakref import WeakKeyDictionary
 
 import geopandas as gpd
+
+from validate_osm.source import File
 from validate_osm.util.scripts import logged_subprocess
 
 
@@ -54,7 +56,7 @@ class DescriptorPipeSerialize(DescriptorPipe, abc.ABC):
         if not instance.ignore_file and path.exists():
             with logged_subprocess(
                     instance.logger,
-                    f'reading {owner.__name__}.{self.name} from {path} ({os.path.getsize(path) / 1024 / 1024 :.1f} MB)'
+                    f'reading {owner.__name__}.{self.name} from {path} ({File.size(path)})'
             ):
                 data = self._cache[instance] = gpd.read_feather(path)
                 return data

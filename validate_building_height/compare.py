@@ -1,4 +1,3 @@
-from functools import partial
 from typing import Type
 
 from validate_building_height.source import (
@@ -8,6 +7,8 @@ from validate_building_height.source import (
 )
 from validate_osm.compare.compare import Compare
 from validate_osm.source.source import BBox
+from validate_osm.util.compare_partial import partial
+
 
 uic = BBox([41.86230680163941, -87.65090039861178, 41.87438700655404, -87.64710239060574])
 rio = BBox([-23.033529148211027, -43.36733954814765, -22.768918993658822, -43.144602821095134])
@@ -36,6 +37,8 @@ CompareRio: Type[Compare] = partial(
     verbose=True
 )
 
+# TODO: Still some situations where multiple Compare.logger handlers
+# TODO: Compare[bbox] returns a smaller Compare instance
 # TODO: logger.debug for processes; logger.info for things that may take time.
 # TODO: Check that we are loading .feather and not .geojson in this output. Perhaps add an attribute to dataclass:
 """
@@ -48,6 +51,8 @@ CompareRio: Type[Compare] = partial(
 # TODO: Check why it says loading .geojson and not .feather
 
 if __name__ == '__main__':
+    # compare = CompareChicago(debug=True, redo=['data', 'footprint', ])
+    # compare = CompareChicago(debug=True, redo=['data', 'footprint', ])
     compare = CompareChicago(debug=True)
     compare.data
     compare.aggregate
