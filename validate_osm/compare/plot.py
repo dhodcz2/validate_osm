@@ -24,6 +24,14 @@ class DescriptorPlot:
     def dark_background(self):
         return None
 
+    @property
+    def figsize(self):
+        ...
+
+    @figsize.setter
+    def figsize(self, val: tuple[float, float]):
+        plt.rcParams['figure.figsize'] = val
+
     @dark_background.setter
     def dark_background(self, val: bool):
         if val:
@@ -31,10 +39,10 @@ class DescriptorPlot:
         else:
             plt.style.use('default')
 
-    def matches(self, ubid=None):
+    def matches(self, ubid=None, annotations: bool = False):
         from validate_osm.compare.compare import Compare
         self._instance: Compare
-        agg = self._instance.aggregate
+        agg = self._instance.aggregate.copy()
         if ubid is None:
             pass
         elif isinstance(ubid, Hashable):
@@ -50,27 +58,42 @@ class DescriptorPlot:
         # Assign a color and hatch to every unique UBID
         lenc = len(COLORS)
         lenh = len(HATCHES)
-        groups = pd.MultiIndex.from_tuples(
-            itertools.chain.from_iterable(agg.groupby('ubid').groups.values()),
-            names=['ubid', 'name']
-        )
+        groups = agg.groupby('ubid').indices.values()
+        # agg['color'] = [
+        #     COLORS[i % lenc]
+        #     for i, group in enumerate(agg.groupby('ubid').groups.values())
+        #     for val in group
+        # ]
+        # agg['hatch'] = [
+        #     HATCHES[i % lenh]
+        #     for i, group in enumerate(groups)
+        #     for val in group
+        # ]
         agg['color'] = pd.Series((
             COLORS[i % lenc]
             for i, group in enumerate(groups)
-        ), index=groups)
+            for val in group
+        ), index=iter(groups))
         agg['hatch'] = pd.Series((
-            HATCHES[i % lenh]
+            HATCHES[i % lenc]
             for i, group in enumerate(groups)
-        ), index=groups)
+            for val in group
+        ))
 
         # Each name corresponds to an axis; for each unique UBID with that name, plot with the color and hatch
         for name, axis in zip(names, axes):
             axis.set_title(name)
             subagg: gpd.GeoDataFrame = agg.xs(name, level='name')
             for (color, hatch), loc in subagg.groupby(['color', 'hatch']).groups.items():
-                subagg.loc[loc].geometry.plot(color=color, hatch=hatch, ax=axis)
-            for centroid, iloc in zip(subagg['centroid'].to_crs(4326), subagg['iloc']):
-                axis.annotate(str(iloc), xy=(float(centroid.x), float(centroid.y)))
+                # subagg.loc[loc].geometry.plot(color=color, hatch=hatch, ax=axis)
+                try:
+                    subagg.loc[loc].geometry.plot(color=color, hatch=hatch, ax=axis)
+                except TypeError as e:
+                    print(f"{loc=}, {color=}, {hatch=}, {axis=}, {name=}")
+                    raise e
+            if annotations:
+                for centroid, iloc in zip(subagg['centroid'], subagg['iloc']):
+                    axis.annotate(str(iloc), xy=(float(centroid.x), float(centroid.y)))
 
     def matched(self, name: Hashable, others: Optional[Hashable] = None):
         from validate_osm.compare.compare import Compare

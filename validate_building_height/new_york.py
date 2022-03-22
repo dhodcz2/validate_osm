@@ -17,7 +17,7 @@ from validate_osm.config import ROOT
 # )
 from validate_building_height.base import Height, HeightOSM
 from validate_osm.source.source import (
-    BBoxStruct, BBox,
+    BBox, BBox,
 )
 from validate_osm.source import (
     Source,

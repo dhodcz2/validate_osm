@@ -1,21 +1,14 @@
-import itertools
-from validate_osm.source.resource import File
-import logging
 import os
 from pathlib import Path
-from typing import Iterator, Optional, Type, Collection
+from typing import Iterator, Optional, Type
 from typing import Union
 from weakref import WeakKeyDictionary
 
 import geopandas as gpd
-import networkx
-import pandas as pd
 from geopandas import GeoDataFrame
-from networkx import connected_components
-from python_log_indenter import IndentedLoggerAdapter
 
 from validate_osm.source.aggregate import AggregateFactory
-from validate_osm.source.groups import Groups
+from validate_osm.source.resource import File
 from validate_osm.source.source import Source
 from validate_osm.util.scripts import logged_subprocess
 
@@ -39,7 +32,7 @@ class DescriptorAggregate:
                 return aggregate
         else:
             with logged_subprocess(
-                    instance.logger, f'reading {instance.name}.aggregate from {path} ({File.size(path)})'
+                    instance.logger, f'reading {instance.name}.aggregate from {path} ({File.size(path)})', timed=False
             ):
                 agg = self.cache[instance] = gpd.read_feather(self.path)
                 return agg
@@ -57,13 +50,11 @@ class DescriptorAggregate:
             if other_factory.__class__ is not factory.__class__:
                 raise ValueError(f"{source.__class__.__name__}.factory!={other_source.__class__.name}.factory")
         self._instance.logger.debug(f'using {factory.__name__}')
-        return factory
+        return factory(self._instance)
 
-    def __enter__(self):
-        # with self.factory as aggregate:
-        #     self.cache[self._instance] = aggregate
-        # return aggregate
-        aggregate = self.cache[self._instance] = self.factory(self._instance)
+    def __enter__(self) -> GeoDataFrame:
+        with self.factory as aggregate:
+            self.cache[self._instance] = aggregate
         return aggregate
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -80,6 +71,9 @@ class DescriptorAggregate:
     def __delete__(self, instance):
         if instance in self.cache:
             del self.cache[instance]
+
+    def __set__(self, instance, value):
+        self.cache[instance] = value
 
     @property
     def path(self) -> Path:

@@ -48,7 +48,8 @@ class DescriptorWays:
     def __iter__(self) -> Iterator[OverpassResult]:
         from validate_osm.source.source_osm import SourceOSM
         self.source: SourceOSM
-        fragments = FragmentBBox(self.source.bbox.data.ellipsoidal.bounds)
+        # fragments = FragmentBBox(self.source.bbox.data.ellipsoidal.bounds)
+        fragments = FragmentBBox(self.source.bbox.to_crs(4326).ellipsoidal.bounds)
         while fragments:
             peak = fragments.peak()
             query = self.source.query(peak, type=self.type, appendix='out count;')
@@ -68,7 +69,7 @@ class DescriptorRelations(DescriptorWays):
 
     def __init__(self, *args, **kwargs):
         super(DescriptorWays, self).__init__(*args, **kwargs)
-        self.groups = []
+        self.groups: list[list[str]] = []
 
     # TODO: How can we differentiate between groups that are incomplete because they are cut off by the bbox
     #   versus groups that have members that were disqualified by the query?

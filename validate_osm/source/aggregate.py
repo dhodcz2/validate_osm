@@ -74,13 +74,13 @@ class AggregateFactory:
     #     result['centroid'] = result['centroid'].to_crs(3857)
     #     return result
 
-    def __enter__(self):
+    def __enter__(self) -> GeoDataFrame:
         functions = [
             (name, func)
             for cls in self.__class__.mro()
             for name, func in cls.__dict__.items()
             if not name.startswith('_')
-            and isinstance(func, Callable)
+               and isinstance(func, Callable)
         ]
         result = GeoDataFrame({
             name: self._decorator(func)(self)
@@ -92,31 +92,27 @@ class AggregateFactory:
         if len(inval):
             self._compare.logger.warning(f'no geom: {inval}')
             result = result[result['geometry'].notna()]
-        result['geometry'] = result['geometry'].to_crs(3857)
-        result['centroid'] = result['centroid'].to_crs(3857)
         return result
 
     def __exit__(self, exc_type, exc_val, exc_tb):
 
         ...
 
-
-
     def geometry(self):
         def data():
-            yield from self._groups.ungrouped['geometry'].to_crs(4326)
+            yield from self._groups.ungrouped['geometry']
             yield from (
-                gdf['geometry'].to_crs(4326).unary_union
+                gdf['geometry'].unary_union
                 for gdf in self._groups.grouped
             )
 
-        return GeoSeries(data=data(), index=self._groups.index, crs=4326)
+        return GeoSeries(data=data(), index=self._groups.index, crs=3857)
 
     def centroid(self):
         def data():
-            yield from self._groups.ungrouped['centroid'].to_crs(3857)
+            yield from self._groups.ungrouped['centroid']
             yield from (
-                gdf['centroid'].to_crs(3857).unary_union.centroid
+                gdf['centroid'].unary_union.centroid
                 for gdf in self._groups.grouped
             )
 

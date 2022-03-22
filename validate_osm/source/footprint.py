@@ -1,5 +1,6 @@
 import functools
 import itertools
+import logging
 import os
 from typing import Generator, Collection
 from typing import Hashable
@@ -23,24 +24,40 @@ class CallableFootprint:
         compare: Compare
         self.compare = compare
         self.path = compare.directory / 'footprint.feather'
-        self._footprints = None
+        self._gdf = None
+
+    def __getitem__(self, item: shapely.geometry.Polygon) -> 'CallableFootprint':
+        footprints = CallableFootprint(self.compare)
+        gdf = self.gdf
+        footprints.gdf = gdf[gdf.geometry.intersects(item)]
+        return footprints
+
 
     @property
-    def footprints(self):
-        if self._footprints is not None:
-            return self._footprints
+    def gdf(self) -> GeoDataFrame:
+        if self._gdf is not None:
+            return self._gdf
         if 'footprint' not in self.compare.redo and 'footprints' not in self.compare.redo and self.path.exists():
             with logged_subprocess(self.compare.logger, f'reading footprints from {self.path}'):
-                footprints = self._footprints = gpd.read_feather(self.path)
+                footprints = self._gdf = gpd.read_feather(self.path)
                 return footprints
         else:
-            with logged_subprocess(self.compare.logger, 'building footprints'):
+            with logged_subprocess(self.compare.logger, 'creating footprints'):
                 try:
                     with self as footprints:
                         return footprints
                 except RecursionError:
                     _ = self.compare.data
-                    return self.footprints  # Try again, now that data has been created
+                    return self.gdf  # Try again, now that data has been created
+
+    @gdf.setter
+    def gdf(self, val):
+        self._gdf = val
+
+    @gdf.deleter
+    def gdf(self):
+        del self._gdf
+
 
     def __enter__(self) -> GeoDataFrame:
         # If footprints is called before data, there is an infinite recursion
@@ -139,7 +156,7 @@ class CallableFootprint:
         footprints = footprints.set_index(identity)
         self.compare.logger.debug(f'identified footprints with {identity.name=}')
 
-        self._footprints = footprints
+        self._gdf = footprints
         return footprints
 
     def identify(self, gdf: GeoDataFrame) -> pd.Series:
@@ -150,27 +167,30 @@ class CallableFootprint:
         if not path.parent.exists():
             os.makedirs(path.parent)
         with logged_subprocess(self.compare.logger, f'serializing footprints to {path}', timed=False):
-            self._footprints.to_feather(path)
+            self._gdf.to_feather(path)
 
-    @functools.cached_property
+    @property
     def _annoy(self) -> AnnoyIndex:
         annoy = AnnoyIndex(2, 'euclidean')
-        for i, centroid in enumerate(self.footprints['centroid']):
+        for i, centroid in enumerate(self.gdf['centroid']):
             annoy.add_item(i, (centroid.x, centroid.y))
-        annoy.build(10)
+        annoy.build(50)
         return annoy
 
     def __call__(self, data: GeoDataFrame) -> GeoDataFrame:
         data['geometry'] = data['geometry'].to_crs(3857)
         data['centroid'] = data['centroid'].to_crs(3857)
         data['area'] = data['geometry'].area
-        footprints = self.footprints
+        with logged_subprocess(self.compare.logger, 'building annoy', level=logging.DEBUG):
+            annoy = self._annoy
+        footprints = self.gdf
 
         def footprint() -> Generator[Hashable, None, None]:
-            # TODO: ValueError: Length of values (74709) does not match length of index (74999)
-            #   Therefore, there has been some missed matches (with n=5).
+            # Even with n=30, there are 6 unmatched points out of a list of 75 thousand.
+            #   Increasing n does not seem to be the best solution. How can we intelligently ensure a match?
+            # TODO: We need to configure the searching algorithm so that a match is guaranteed
             for i, (c, a, g) in enumerate(data[['centroid', 'area', 'geometry']].values):
-                for n in self._annoy.get_nns_by_vector((c.x, c.y), 10):
+                for n in annoy.get_nns_by_vector((c.x, c.y), 50):
                     match = footprints.iloc[n]
                     geometry: BaseGeometry = match['geometry']
                     if not geometry.intersects(g):

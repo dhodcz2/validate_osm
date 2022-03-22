@@ -104,8 +104,6 @@ class DescriptorData:
             self._instance.logger.warning(f'invalid geometry: {msg}')
             data = data[~inval]
 
-        data['geometry'] = data['geometry'].to_crs(3857)
-        data['centroid'] = data['centroid'].to_crs(3857)
         self.cache[self._instance] = data
         return data
 
@@ -113,6 +111,7 @@ class DescriptorData:
         from validate_osm.compare.compare import Compare
         self._instance: Compare
         data = self.cache[self._instance]
+
         if self._instance.serialize:
             path = self.path
             if not path.parent.exists():

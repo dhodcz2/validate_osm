@@ -53,7 +53,7 @@ class DescriptorPipeSerialize(DescriptorPipe, abc.ABC):
         if instance in self._cache:
             return self._cache[instance]
         path = self.path
-        if not instance.ignore_file and path.exists():
+        if not instance.redo and path.exists():
             with logged_subprocess(
                     instance.logger,
                     f'reading {owner.__name__}.{self.name} from {path} ({File.size(path)})',

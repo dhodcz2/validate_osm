@@ -34,25 +34,25 @@ CompareRio: Type[Compare] = partial(
     Compare,
     rio,
     HeightOSM, SourceMSBuildingFootprints,
-    verbose=True
+    verbose=True,
 )
 
 # TODO: Still some situations where multiple Compare.logger handlers
 # TODO: Compare[bbox] returns a smaller Compare instance
-# TODO: logger.debug for processes; logger.info for things that may take time.
-# TODO: Check that we are loading .feather and not .geojson in this output. Perhaps add an attribute to dataclass:
-"""
-2022-03-18 03:09:09,059 - INFO - Building Footprints (current).geojson took 5.217855310440063 minutes to load.
-2022-03-18 03:09:09,059 - INFO - serializing /home/arstneio/PycharmProjects/ValidateOSM/validate_osm/source/static/StaticNaive/Building Footprints (current).geojson
-2022-03-18 03:09:17,296 - INFO - Building Footprints (current).feather to 0.1372891624768575 minutes to serialize.
-2022-03-18 03:09:17,297 - INFO - reading Building Footprints (current).feather
-2022-03-18 03:09:24,854 - INFO - Building Footprints (current).geojson took 0.1259451150894165 minutes to load."""
-
-# TODO: Check why it says loading .geojson and not .feather
 
 if __name__ == '__main__':
     # compare = CompareChicago(debug=True, redo=['data', 'footprint', ])
     # compare = CompareChicago(debug=True, redo=['data', 'footprint', ])
-    compare = CompareChicago(debug=True, redo=['data', 'footprint', 'aggregate'])
-    compare.plot.matches()
-    print()
+    # compare = CompareChicago(debug=True, redo=['data', 'footprint', 'aggregate'])
+    # compare.data
+    # compare.aggregate
+    # print()
+    compare = CompareChicago(debug=True, redo=None)
+    from validate_osm.source.source import BBox
+    smaller = compare[
+        BBox([41.874244361608234, -87.63580711113813, 41.88816184961424, -87.61128776307615], crs='epsg:4326')
+    ]
+    smaller.plot.matches()
+    # compare.data
+    # compare.footprints
+    # compare.plot.matches()

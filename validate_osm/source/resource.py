@@ -172,7 +172,7 @@ class StaticBase(Resource):
             for file in files:
                 if not file.preprocessed_path.exists():
                     with logged_subprocess(self.instance.logger, f'preprocessing {file.preprocessed_path.name}'):
-                        gdf = self._read_file(file.path, bbox, timed=True, )
+                        gdf = self._read_file(file.path, bbox, timed=False)
                         self.instance.logger.info(f'serializing {file.preprocessed_path.name}')
                         gdf.to_feather(file.preprocessed_path)
 
@@ -206,15 +206,12 @@ class StaticBase(Resource):
 
     @property
     def bbox(self) -> shapely.geometry.Polygon:
-        bbox = self.instance.bbox.data
-        orientation = (bbox.ellipsoidal if self.flipped else bbox.cartesian)
-        gs = gpd.GeoSeries((orientation,), crs=self.crs)
-        gs = gs.to_crs(self.crs)
-        # I was considering flipping the coords, but maybe just changing ellipsoidal with cartesian is ie
-        # gs = gs.map(lambda geom: shapely.ops.transform(lambda x, y, z=None: (y, x, z), geom))
-
-        bbox: shapely.geometry.Polygon = gs.iloc[0]
-        return bbox
+        from validate_osm.source.source import Source
+        self.instance: Source
+        if self.flipped:
+            return self.instance.bbox.to_crs(self.crs).ellipsoidal
+        else:
+            return self.instance.bbox.to_crs(self.crs).cartesian
 
 
 class StaticNaive(StaticBase):

@@ -35,7 +35,8 @@ class BuildingCallableFootprint(CallableFootprint):
                     codeLength=11
                 )
 
-        return pd.Series(ubid(), index=gdf.index, name='ubid', dtype='string')
+        result = pd.Series(ubid(), index=gdf.index, name='ubid', dtype='string')
+        return result
 
 
 class BuildingSource(Source):

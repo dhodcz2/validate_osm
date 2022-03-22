@@ -1,6 +1,5 @@
 import dataclasses
 import inspect
-import logging
 from collections import UserDict
 from typing import Callable, Any, Iterator, Union
 from weakref import WeakKeyDictionary
@@ -56,10 +55,10 @@ class StructData:
             # Got a Series
             if isinstance(obj, Series):
                 if not isinstance(obj.index, pandas.core.indexes.range.RangeIndex):
-                    source.logger.debug(
-                        f"{obj}.index returns a {type(obj.index)}; naively passing this may result in a mismatched "
-                        f"column index. Resetting this index so that column indices align regardless of implementation."
-                    )
+                    # source.logger.debug(
+                    #     f"index returns a {type(obj.index)}; naively passing this may result in a mismatched "
+                    #     f"column index. Resetting this index so that column indices align regardless of implementation."
+                    # )
                     obj = obj.reset_index(drop=True)
                 if self.dtype is not None:
                     obj = obj.astype(self.dtype)

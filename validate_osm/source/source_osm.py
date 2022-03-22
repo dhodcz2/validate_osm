@@ -15,7 +15,7 @@ from networkx import connected_components
 from pandas import Series
 from shapely.geometry import Polygon
 
-from validate_osm.source.overpass import DynamicOverpassResource
+from validate_osm.source.overpass import DynamicOverpassResource, DescriptorRelations
 from validate_osm.source.source import Source
 
 logger = logging.getLogger(__name__.partition('.')[0])
@@ -35,7 +35,10 @@ class SourceOSM(Source, abc.ABC):
 
         # Group together according to relations
         G = networkx.Graph()
-        for group in self.resource.relations._groups:
+        # for group in self.resource.relations._groups:
+        # sel
+        relations: DescriptorRelations = self.resource.relations
+        for group in relations.groups:
             G.add_nodes_from(group)
             G.add_edges_from(zip(group[:-1], group[1:]))
         index = set(data.index)

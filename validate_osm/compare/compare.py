@@ -1,5 +1,4 @@
 import functools
-from validate_osm.source.source import BBox
 import inspect
 import logging
 from pathlib import Path
@@ -51,7 +50,6 @@ class Compare:
             for source in self.sources.values():
                 source.bbox = bbox
         self.bbox = bbox
-        self._footprint = None
         logger = logging.getLogger(__name__.partition('.')[0])
         logger.setLevel(
             logging.DEBUG if debug else
@@ -68,7 +66,6 @@ class Compare:
             source.logger = self.logger
         self.redo = redo
         self.serialize = serialize
-
 
     @property
     def redo(self):
@@ -87,14 +84,16 @@ class Compare:
         else:
             raise TypeError(names)
         for name, source in self.sources.items():
-            source.ignore_file = name in self._redo
+            source.redo = name in self._redo
 
     @redo.deleter
     def redo(self):
         self._redo = {}
 
-    @functools.cached_property
+    @property
     def footprint(self) -> CallableFootprint:
+        if hasattr(self, '_footprint'):
+            return self._footprint
         sources = self.sources.values()
         footprints: Iterator[tuple[Type[CallableFootprint], Source]] = zip(
             (source.footprint for source in sources), sources
@@ -103,16 +102,12 @@ class Compare:
         for other_footprint, other_source in footprints:
             if other_footprint is not footprint:
                 raise ValueError(f"{source.__class__.__name__}.footprint!={other_source.__class__.name}.footprint")
-
-        return footprint(self)
+        self._footprint = footprint = footprint(self)
+        return footprint
 
     @property
     def footprints(self) -> GeoDataFrame:
-        return self.footprint.footprints
-
-    @footprints.deleter
-    def footprints(self):
-        del self.footprint.footprints
+        return self.footprint.gdf
 
     @functools.cached_property
     def name(self) -> str:
@@ -121,27 +116,67 @@ class Compare:
         return '_'.join(names)
 
     def __repr__(self):
-        return f'{self.__class__.__name__}{self.name}'
+        return f'{self.__class__.__name__}[{self.name}]'
 
+    def __getitem__(self, items) -> 'Compare':
+        if not isinstance(items, tuple):
+            items = (items,)
+        data = self.data
+        agg = self.aggregate
 
-    # def __getitem__(self, items) -> 'Compare':
-    #     if not isinstance(items, tuple):
-    #         items = (items,)
-    #     agg = self.aggregate
-    #     names = [
-    #         item for item in items
-    #         if isinstance(item, str)
-    #     ]
-    #
-    #
-    #     for item in items:
-    #
-    #         if isinstance(item, BBox):
-    #             ...
-    #         elif is
-    #
+        # # [[94.1, -70, 94.8, -72]] or [BBox(94.1, -70, 94.8, -72)]
+        try:
+            bbox = next(
+                item for item in items
+                if isinstance(item, (list, BBox))
+            )
+        except StopIteration:
+            bbox = self.bbox
+            footprint = self.footprint
+        else:
+            if isinstance(bbox, list):
+                # Flipped because it's typically constructed with ellipsoidal
+                projected = BBox(bbox, crs='3857')
+                polygon = projected.ellipsoidal
+            elif isinstance(bbox, BBox):
+                projected = bbox.to_crs(3857)
+                # TODO: Why is it ellipsoidal and not cartesian? Something doesn't seem right.
+                polygon = projected.ellipsoidal
+                # The issue of flipped coords with ellipsoidal/cartesian is very annoying
 
+            footprint = self.footprint[polygon]
+            identifiers = set(footprint.gdf.index.get_level_values('ubid'))
+            data = data[data.index.get_level_values('ubid').isin(identifiers)]
+            agg = agg[agg.index.get_level_values('ubid').isin(identifiers)]
 
+        # ['osm', 'msbf']
+        names = {
+            item for item in items
+            if isinstance(item, str)
+        }
+        if names:
+            data = data[data.index.get_level_values('name').isin(names)]
+            agg = data[data.index.get_level_values('name').isin(names)]
+            sources = {
+                name: source
+                for name, source in self.sources.items()
+                if name in names
+            }
+        else:
+            sources = self.sources
+
+        compare = Compare(
+            bbox,
+            redo=None,
+            debug=False,
+            verbose=False,
+            serialize=False
+        )
+        compare.data = data
+        compare._footprint = footprint
+        compare.aggregate = agg
+        compare.sources = sources
+        return compare
 
     @functools.cached_property
     def directory(self) -> Path:
