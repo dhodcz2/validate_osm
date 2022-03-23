@@ -9,6 +9,7 @@ import pandas as pd
 from geopandas import GeoDataFrame
 from python_log_indenter import IndentedLoggerAdapter
 
+from validate_osm.compare.validate import DescriptorValidate
 from validate_osm.compare.aggregate import DescriptorAggregate
 from validate_osm.compare.data import DescriptorData
 from validate_osm.compare.plot import DescriptorPlot
@@ -24,6 +25,7 @@ class Compare:
     plot = DescriptorPlot()
     batch: Union[GeoDataFrame]
     sources: dict[str, Source]
+    validate = DescriptorValidate
 
     # TODO: How best can the user specify which files are to be redone?
     def __init__(
