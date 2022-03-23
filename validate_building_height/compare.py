@@ -45,4 +45,5 @@ if __name__ == '__main__':
 
     bbox = BBox((41.87562863242608, -87.63515367506594, 41.88690149672215, -87.62048834003896), crs='epsg:4326')
     loop = compare[bbox]
-    loop.plot.how(name='msbf')
+    # loop.plot.how(name='msbf')
+    loop.plot.where(column='height_m')

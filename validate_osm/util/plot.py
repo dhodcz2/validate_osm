@@ -356,7 +356,6 @@ def plot_discrepancy(match: gpd.GeoDataFrame, needles: gpd.GeoSeries, haystack: 
             ax_hay.annotate(str(int(round(height, 0))), (float(point.x), float(point.y)))
 
 
-
 def plot_groupings(
         source: GeoDataFrame,
         recipient: GeoDataFrame,

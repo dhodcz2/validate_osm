@@ -1,7 +1,8 @@
+from geopandas import GeoDataFrame
 import itertools
 
 import matplotlib.colors as mcolors
-from typing import Hashable, Optional, Iterable, Union
+from typing import Hashable, Optional, Iterable, Union, Iterator
 
 import pandas as pd
 
@@ -148,13 +149,61 @@ class DescriptorPlot:
             for centroid, value in zip(df['centroid'], df[column]):
                 axis.annotate(str(value), xy=(float(centroid.x), float(centroid.y)))
 
-    def where(self, name: str, value: str, annotation: Optional[str] = 'iloc'):
-        """
-        Plots where the discrepancies; shows a colormap of percent_error and highlights entries that
-        the average value.
-        :param validating:
-        :param name:
-        :return:
-        """
+    def where(self, column: str, names: Union[str, Iterable[str]] = None, annotation: Optional[str] = 'iloc'):
+        # TODO: if no comparison, color is gray
+        from validate_osm.compare.compare import Compare
+        self._instance: Compare
+        if isinstance(names, str):
+            names = (names,)
+        elif names is None:
+            names = list(self._instance.sources.keys())
+        else:
+            names = list(names)
 
+        fig, axes = plt.subplots(1, len(names))
+        agg = self._instance.aggregate
+        subaggs: dict[str, gpd.GeoDataFrame] = {
+            name: agg.xs(name, level='name', drop_level=False)
+            for name in names
+        }
 
+        for (name, subagg), ax in zip(subaggs.items(), axes):
+            subagg: GeoDataFrame
+            others: gpd.GeoDataFrame = agg[agg.index.get_level_values('name') != name]
+            others = others[others[column].notna()]
+
+            ubid = set(
+                subagg[subagg[column].notna()].index.get_level_values('ubid')
+                    .intersection(others.index.get_level_values('ubid'))
+            )
+
+            colored: GeoDataFrame = subagg[subagg.index.get_level_values('ubid').isin(ubid)]
+            grey: GeoDataFrame = subagg[~subagg.index.get_level_values('ubid').isin(ubid)]
+            others: GeoDataFrame= others[others.index.get_level_values('ubid').isin(ubid)]
+
+            other_values = {
+                ubid: value
+                for ubid, value in zip(others.index.get_level_values('ubid'), others[column])
+            }
+
+            def gen() -> Iterator[float]:
+                nonlocal subagg
+                nonlocal ubid
+                nonlocal others
+                for ubid, value in zip(colored.index.get_level_values('ubid'), colored[column]):
+                    other = other_values[ubid]
+                    if other > value:
+                        yield (other - value) / other
+                    else:
+                        yield (value - other) / value
+
+            colored['percent_error'] = [(1 - val) for val in gen()]
+
+            ax.set_title(f'{name}.aggregate.{column}')
+            colored.plot(ax=ax, column='percent_error', cmap='RdYlGn')
+            grey.plot(color='grey', ax=ax)
+
+            if annotation:
+                for c, p, a in zip(colored['centroid'], colored['percent_error'], colored[annotation]):
+                    if p < .50:
+                        ax.annotate(str(a), xy=(float(c.x), float(c.y)), color='black')
