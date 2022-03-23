@@ -32,14 +32,13 @@ class CallableFootprint:
         footprints.gdf = gdf[gdf.geometry.intersects(item)]
         return footprints
 
-
     @property
     def gdf(self) -> GeoDataFrame:
         if self._gdf is not None:
             return self._gdf
         if 'footprint' not in self.compare.redo and 'footprints' not in self.compare.redo and self.path.exists():
             with logged_subprocess(self.compare.logger, f'reading footprints from {self.path}'):
-                footprints = self._gdf = gpd.read_feather(self.path)
+                footprints = self.gdf = gpd.read_feather(self.path)
                 return footprints
         else:
             with logged_subprocess(self.compare.logger, 'creating footprints'):
@@ -51,13 +50,13 @@ class CallableFootprint:
                     return self.gdf  # Try again, now that data has been created
 
     @gdf.setter
-    def gdf(self, val):
-        self._gdf = val
+    def gdf(self, gdf: GeoDataFrame):
+        gdf['iloc'] = pd.Series(range(len(gdf)), dtype='int32', index=gdf.index)
+        self._gdf = gdf
 
     @gdf.deleter
     def gdf(self):
         del self._gdf
-
 
     def __enter__(self) -> GeoDataFrame:
         # If footprints is called before data, there is an infinite recursion
@@ -156,7 +155,7 @@ class CallableFootprint:
         footprints = footprints.set_index(identity)
         self.compare.logger.debug(f'identified footprints with {identity.name=}')
 
-        self._gdf = footprints
+        self.gdf = footprints
         return footprints
 
     def identify(self, gdf: GeoDataFrame) -> pd.Series:
@@ -164,10 +163,12 @@ class CallableFootprint:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         path = self.path
+        gdf = self._gdf
         if not path.parent.exists():
             os.makedirs(path.parent)
         with logged_subprocess(self.compare.logger, f'serializing footprints to {path}', timed=False):
-            self._gdf.to_feather(path)
+            gdf.to_feather(path)
+        self._gdf = gdf
 
     @property
     def _annoy(self) -> AnnoyIndex:

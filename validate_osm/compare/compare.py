@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Union, Iterable, Type, Hashable, Optional, Iterator
 
 import geopandas as gpd
+import pandas as pd
 from geopandas import GeoDataFrame
 from python_log_indenter import IndentedLoggerAdapter
 
@@ -56,10 +57,14 @@ class Compare:
             logging.INFO if verbose else
             logging.WARNING
         )
-        handler = logging.StreamHandler()
-        formatter = logging.Formatter(f"%(levelname)10s %(message)s")
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
+        for handler in logger.handlers:
+            if isinstance(handler, logging.StreamHandler):
+                break
+        else:
+            handler = logging.StreamHandler()
+            formatter = logging.Formatter(f"%(levelname)-10s %(message)s")
+            handler.setFormatter(formatter)
+            logger.addHandler(handler)
         logger = IndentedLoggerAdapter(logger)
         self.logger = logger
         for source in self.sources.values():
@@ -165,6 +170,9 @@ class Compare:
         else:
             sources = self.sources
 
+        data['iloc'] = pd.Series(range(len(data)), dtype='int32')
+        agg['iloc'] = pd.Series(range(len(agg)), dtype='int32')
+
         compare = Compare(
             bbox,
             redo=None,
@@ -175,6 +183,7 @@ class Compare:
         compare.data = data
         compare._footprint = footprint
         compare.aggregate = agg
+        # Perhaps create a new Source instance that encapsulates a smaller .data
         compare.sources = sources
         return compare
 

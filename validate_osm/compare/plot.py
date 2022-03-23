@@ -1,5 +1,4 @@
 import itertools
-import warnings
 
 import matplotlib.colors as mcolors
 from typing import Hashable, Optional, Iterable, Union
@@ -11,7 +10,26 @@ HATCHES = '\ - | \\'.split()
 
 import geopandas as gpd
 import matplotlib.pyplot as plt
-import numpy as np
+
+
+def _pseudo_colormap(groups: Iterable[pd.Index], gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    # Assign a color and hatch to every unique UBID
+    lenc = len(COLORS)
+    lenh = len(HATCHES)
+    # index = pd.MultiIndex(itertools.chain.from_iterable(groups), names=gdf.index.names)
+    index = pd.MultiIndex.from_tuples(itertools.chain.from_iterable(groups), names=gdf.index.names)
+    color = pd.Series((
+        COLORS[i % lenc]
+        for i, group in enumerate(groups)
+        for _ in group
+    ), index=index)
+    hatch = pd.Series((
+        COLORS[i % lenh]
+        for i, group in enumerate(groups)
+        for _ in group
+    ), index=index)
+    gdf = gdf.assign(color=color, hatch=hatch)
+    return gdf
 
 
 class DescriptorPlot:
@@ -26,11 +44,15 @@ class DescriptorPlot:
 
     @property
     def figsize(self):
-        ...
+        return plt.rcParams['figure.figsize']
 
     @figsize.setter
     def figsize(self, val: tuple[float, float]):
         plt.rcParams['figure.figsize'] = val
+
+    @figsize.deleter
+    def figsize(self):
+        del plt.rcParams['figure.figsize']
 
     @dark_background.setter
     def dark_background(self, val: bool):
@@ -39,10 +61,12 @@ class DescriptorPlot:
         else:
             plt.style.use('default')
 
-    def matches(self, ubid=None, annotations: bool = False):
+    @staticmethod
+    def matches(self, ubid=None, annotation: Optional[str] = 'iloc'):
         from validate_osm.compare.compare import Compare
         self._instance: Compare
-        agg = self._instance.aggregate.copy()
+        agg = self._instance.aggregate
+
         if ubid is None:
             pass
         elif isinstance(ubid, Hashable):
@@ -52,56 +76,31 @@ class DescriptorPlot:
         else:
             raise TypeError(ubid)
 
+        agg: gpd.GeoDataFrame
+        groups: Iterable[pd.Index] = agg.groupby('ubid').groups.values()
+        agg = _pseudo_colormap(groups, agg)
+
         names = list(agg.index.get_level_values('name').unique())
         fig, axes = plt.subplots(1, len(names))
 
-        # Assign a color and hatch to every unique UBID
-        lenc = len(COLORS)
-        lenh = len(HATCHES)
-        groups = agg.groupby('ubid').indices.values()
-        # agg['color'] = [
-        #     COLORS[i % lenc]
-        #     for i, group in enumerate(agg.groupby('ubid').groups.values())
-        #     for val in group
-        # ]
-        # agg['hatch'] = [
-        #     HATCHES[i % lenh]
-        #     for i, group in enumerate(groups)
-        #     for val in group
-        # ]
-        agg['color'] = pd.Series((
-            COLORS[i % lenc]
-            for i, group in enumerate(groups)
-            for val in group
-        ), index=iter(groups))
-        agg['hatch'] = pd.Series((
-            HATCHES[i % lenc]
-            for i, group in enumerate(groups)
-            for val in group
-        ))
-
         # Each name corresponds to an axis; for each unique UBID with that name, plot with the color and hatch
         for name, axis in zip(names, axes):
-            axis.set_title(name)
+            axis.set_title(f'{name}.aggregate')
             subagg: gpd.GeoDataFrame = agg.xs(name, level='name')
             for (color, hatch), loc in subagg.groupby(['color', 'hatch']).groups.items():
-                # subagg.loc[loc].geometry.plot(color=color, hatch=hatch, ax=axis)
-                try:
-                    subagg.loc[loc].geometry.plot(color=color, hatch=hatch, ax=axis)
-                except TypeError as e:
-                    print(f"{loc=}, {color=}, {hatch=}, {axis=}, {name=}")
-                    raise e
-            if annotations:
+                subagg.loc[loc].geometry.plot(color=color, hatch=hatch, ax=axis)
+            if annotation:
                 for centroid, iloc in zip(subagg['centroid'], subagg['iloc']):
                     axis.annotate(str(iloc), xy=(float(centroid.x), float(centroid.y)))
 
-    def matched(self, name: Hashable, others: Optional[Hashable] = None):
+    def matched(self, name: Hashable, others: Optional[Hashable] = None, annotation: Optional[str] = 'iloc'):
         from validate_osm.compare.compare import Compare
         self._instance: Compare
         gdf = self._instance.percent_overlap(name, others)
         ax = gdf.plot(cmap='RdYlGn', column='intersection')
-        for centroid, iloc in zip(gdf['centroid'], gdf['iloc']):
-            ax.annotate(str(iloc), xy=(float(centroid.x), float(centroid.y)))
+        if annotation:
+            for centroid, iloc in zip(gdf['centroid'], gdf['iloc']):
+                ax.annotate(str(iloc), xy=(float(centroid.x), float(centroid.y)))
 
     def how(self, name: str, column: Optional[Hashable] = None, ubid: Union[None, Hashable, Iterable[Hashable]] = None):
         """
@@ -126,37 +125,17 @@ class DescriptorPlot:
             data = data[data.index.isin(ubid)]
         else:
             raise TypeError(ubid)
-        if not isinstance(agg, gpd.GeoDataFrame):
-            raise TypeError(agg)
-        if not isinstance(data, gpd.GeoDataFrame):
-            raise TypeError(data)
+        agg: gpd.GeoDataFrame
+        data: gpd.GeoDataFrame
+
+        ubids = agg.groupby('ubid').groups.values()
+        agg = _pseudo_colormap(ubids, agg)
+        ubids = data.groupby('ubid').groups.values()
+        data = _pseudo_colormap(ubids, data)
 
         fig, (axd, axa) = plt.subplots(1, 2)
         axd.set_title(f'{name}.data')
         axa.set_title(f'{name}.aggregate')
-
-        # Assign a color and hatch to every UBID
-        lenc = len(COLORS)
-        lenh = len(HATCHES)
-        ubids = agg.index.get_level_values('ubid')
-        ubids = list(ubids)
-        for df in (data, agg):
-            indices = [
-                df.xs(ubid, level='ubid', drop_level=False).index
-                for ubid in ubids
-            ]
-            df['color'] = pd.Series((
-                COLORS[i % lenc]
-                for i, index in enumerate(indices)
-                for _ in range(len(index))
-            ), index=itertools.chain.from_iterable(indices))
-            df['hatch'] = pd.Series((
-                HATCHES[i % lenh]
-                for i, index in enumerate(indices)
-                for _ in range(len(index))
-            ), index=itertools.chain.from_iterable(indices))
-
-        # Each name corresponds to an axis; for each unique UBID with that name; plot with the color and hatch
         if column is None:
             column = 'iloc'
         for df, axis in zip((data, agg), (axd, axa)):
@@ -169,7 +148,7 @@ class DescriptorPlot:
             for centroid, value in zip(df['centroid'], df[column]):
                 axis.annotate(str(value), xy=(float(centroid.x), float(centroid.y)))
 
-    def where(self, validating: Hashable, name: Hashable):
+    def where(self, name: str, value: str, annotation: Optional[str] = 'iloc'):
         """
         Plots where the discrepancies; shows a colormap of percent_error and highlights entries that
         the average value.
@@ -177,3 +156,5 @@ class DescriptorPlot:
         :param name:
         :return:
         """
+
+

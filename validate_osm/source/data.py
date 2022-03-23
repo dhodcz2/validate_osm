@@ -5,6 +5,7 @@ from typing import Callable, Any, Iterator, Union
 from weakref import WeakKeyDictionary
 
 import pandas
+import pandas as pd
 from geopandas import GeoDataFrame
 from geopandas import GeoSeries
 from pandas import Series
@@ -12,6 +13,9 @@ from pandas.core.indexes.range import RangeIndex
 
 from validate_osm.source.pipe import DescriptorPipeSerialize
 
+
+# TODO: Replace DescriptorData with __enter__, __exit__, __get__, and __set__ from compare.data instead of messing
+#   around with CacheData, CacheStruct, etc.
 
 @dataclasses.dataclass
 class StructData:
@@ -217,6 +221,10 @@ class CacheData(UserDict):
         source.logger.debug(f'{source.__class__.__name__}.data done; deleting {source.resource.__class__.__name__}')
         del source.resource
         return data
+
+    def __setitem__(self, key, gdf: GeoDataFrame):
+        gdf['iloc'] = pd.Series(range(len(gdf)), dtype='int32', index=gdf.index)
+        self.data[key] = gdf
 
     def _data(self, source: object):
         from validate_osm.source.source import Source

@@ -142,6 +142,13 @@ class Source(abc.ABC, metaclass=SourceMeta):
         # handler.setFormatter(formatter)
         # self.logger.addHandler(handler)
 
+    def __contains__(self, item) -> bool:
+        return item in self.__class__.resource
+
+    def __eq__(self, other):
+        # TODO: True if the sources have implemented all of the same data methods
+        raise NotImplementedError
+
     '''
     raw >> data >> groups >> aggregate >> identity >> exclude >> batch
 

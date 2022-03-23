@@ -67,6 +67,12 @@ class Resource(abc.ABC):
     name: str
     link: str
 
+    def __contains__(self, item) -> bool:
+        # TODO: return whether the resource contains data that is relevant to the BBox
+        ...
+
+
+
 
 class StaticBase(Resource):
     crs: Any

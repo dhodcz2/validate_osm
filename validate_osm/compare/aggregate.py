@@ -5,6 +5,7 @@ from typing import Union
 from weakref import WeakKeyDictionary
 
 import geopandas as gpd
+import pandas as pd
 from geopandas import GeoDataFrame
 
 from validate_osm.source.aggregate import AggregateFactory
@@ -17,25 +18,27 @@ class DescriptorAggregate:
     cache: WeakKeyDictionary[object, GeoDataFrame] = WeakKeyDictionary()
 
     def __get__(self, instance: Optional[object], owner: type) -> Union[GeoDataFrame, 'DescriptorAggregate']:
+        if instance in self.cache:
+            return self.cache[instance]
+
         from validate_osm.compare.compare import Compare
         instance: Optional[Compare]
         owner: Type[Compare]
-        self._instance = instance
         self._owner = owner
         if instance is None:
             return self
-        if instance in self.cache:
-            return self.cache[instance]
+
+        self._instance = instance
         path = self.path
         if 'aggregate' in instance.redo or not path.exists():
             with logged_subprocess(instance.logger, f'building {instance.name}.aggregate'), self as aggregate:
-                return aggregate
+                self.__set__(instance, aggregate)
         else:
             with logged_subprocess(
                     instance.logger, f'reading {instance.name}.aggregate from {path} ({File.size(path)})', timed=False
             ):
-                agg = self.cache[instance] = gpd.read_feather(self.path)
-                return agg
+                self.__set__(instance, gpd.read_feather(self.path))
+        return self.__get__(instance, owner)
 
     # TODO: Perhaps clean up this process a bit; it seems like it can be simplified with regards to dunder methods
     @property
@@ -54,7 +57,7 @@ class DescriptorAggregate:
 
     def __enter__(self) -> GeoDataFrame:
         with self.factory as aggregate:
-            self.cache[self._instance] = aggregate
+            self.__set__(self._instance, aggregate)
         return aggregate
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -72,8 +75,9 @@ class DescriptorAggregate:
         if instance in self.cache:
             del self.cache[instance]
 
-    def __set__(self, instance, value):
-        self.cache[instance] = value
+    def __set__(self, instance, gdf: GeoDataFrame):
+        gdf['iloc'] = pd.Series(range(len(gdf)), dtype='int32', index=gdf.index)
+        self.cache[instance] = gdf
 
     @property
     def path(self) -> Path:
