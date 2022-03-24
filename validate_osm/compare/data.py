@@ -44,6 +44,7 @@ class DescriptorData:
 
     def __get__(self, instance: object, owner: Type) -> Union[GeoDataFrame, 'DescriptorData']:
         if instance in self.cache:
+            # TODO: does .copy() slow down significantly?
             return self.cache[instance]
 
         self._owner = owner

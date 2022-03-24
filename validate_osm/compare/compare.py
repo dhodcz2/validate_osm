@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Union, Iterable, Type, Hashable, Optional, Iterator
 
 import geopandas as gpd
+import numpy as np
 import pandas as pd
 from geopandas import GeoDataFrame
 from python_log_indenter import IndentedLoggerAdapter
@@ -25,7 +26,7 @@ class Compare:
     plot = DescriptorPlot()
     batch: Union[GeoDataFrame]
     sources: dict[str, Source]
-    validate = DescriptorValidate
+    validate = DescriptorValidate()
 
     # TODO: How best can the user specify which files are to be redone?
     def __init__(
@@ -261,40 +262,32 @@ class Compare:
         else:
             raise TypeError(name)
 
-    def percent_overlap(self, name: Hashable, others: Optional[Hashable] = None) -> GeoDataFrame:
-        """
-        Returns a GeoDataFrame where intersection = % overlap of the name's entries compared with others
-        :param name:
-        :param others:
-        :return:
-        """
-        agg = self.aggregate
-        this: GeoDataFrame = agg.xs(name, level='name')
-        this['area'] = this.area
-        this['centroid'] = this['centroid'].to_crs(4326)
-        if others is None:
-            others: GeoDataFrame = agg[agg.index.get_level_values('name') != name]
-        else:
-            others: GeoDataFrame = agg[agg.index.get_level_values('name').isin(others)]
+    def containment(self, of: GeoDataFrame, within: GeoDataFrame) -> pd.Series:
+        geometries = {
+            ubid: geom
+            for ubid, geom in zip(within.index, within['geometry'])
+        }
 
         def gen():
-            for row, ubid in zip(this.itertuples(), this.index.get_level_values('ubid')):
-                try:
-                    other = others.xs(ubid, level='ubid')
-                except KeyError:
-                    intersection = 0
+            for ubid, g, a, in zip(of.index, of['geometry'], of.area):
+                if ubid in geometries:
+                    yield g.intersection(geometries[ubid]).area / a
                 else:
-                    intersection = row.geometry.intersection(other.geometry.unary_union).area / row.area
-                yield (row.geometry, row.centroid, intersection, row.iloc)
+                    yield np.nan
 
-        gdf = gpd.GeoDataFrame(gen(), columns=['geometry', 'centroid', 'intersection', 'iloc'])
-        return gdf
+        return pd.Series(gen(), index=of.index, dtype='float64')
 
-        """
-        
-        :param name: Name of the Source that is tested for overlap with others 
-        :return: 
-        """
+    def completion(self, of: GeoDataFrame) -> pd.Series:
+        overlap = self.containment(of=self.footprints, within=of)  # of=footprints is not a mistake
+        overlaps = {
+            ubid: overlap
+            for ubid, overlap in zip(overlap.index, overlap)
+        }
+
+        return pd.Series((
+            overlaps.get(ubid, np.nan)
+            for ubid in of.index
+        ), index=of.index, dtype='float64')
 
 
 """

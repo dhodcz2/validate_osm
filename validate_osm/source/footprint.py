@@ -17,6 +17,7 @@ from shapely.geometry.base import BaseGeometry
 
 from validate_osm.util.scripts import logged_subprocess
 
+# TODO: Perhaps the footprints can be accelerated with multiprocessing over the Summer
 
 class CallableFootprint:
     def __init__(self, compare: object):
@@ -37,7 +38,7 @@ class CallableFootprint:
         if self._gdf is not None:
             return self._gdf
         if 'footprint' not in self.compare.redo and 'footprints' not in self.compare.redo and self.path.exists():
-            with logged_subprocess(self.compare.logger, f'reading footprints from {self.path}'):
+            with logged_subprocess(self.compare.logger, f'reading footprints from {self.path}', timed=False):
                 footprints = self.gdf = gpd.read_feather(self.path)
                 return footprints
         else:

@@ -1,3 +1,5 @@
+import math
+
 from geopandas import GeoDataFrame
 import itertools
 
@@ -33,15 +35,18 @@ def _pseudo_colormap(groups: Iterable[pd.Index], gdf: gpd.GeoDataFrame) -> gpd.G
     return gdf
 
 
+def _suptitle(fig, funcname, l: dict):
+    name = f'compare.plot.{funcname}'
+    l.pop('self')
+    msg = ', '.join(f'{key}={val}' for key, val in l.items())
+    fig.suptitle(f'{name}({msg})')
+
+
 class DescriptorPlot:
     def __get__(self, instance, owner):
         self._instance = instance
         self._owner = owner
         return self
-
-    @property
-    def dark_background(self):
-        return None
 
     @property
     def figsize(self):
@@ -55,15 +60,21 @@ class DescriptorPlot:
     def figsize(self):
         del plt.rcParams['figure.figsize']
 
-    @dark_background.setter
-    def dark_background(self, val: bool):
-        if val:
-            plt.style.use('dark_background')
-        else:
-            plt.style.use('default')
+    @property
+    def style(self):
+        raise NotImplementedError
 
-    @staticmethod
+    @style.setter
+    def style(self, val):
+        plt.style.use(val)
+
+    @style.deleter
+    def style(self):
+        plt.style.use('default')
+
     def matches(self, ubid=None, annotation: Optional[str] = 'iloc'):
+        local = locals().copy()
+        print(local)
         from validate_osm.compare.compare import Compare
         self._instance: Compare
         agg = self._instance.aggregate
@@ -77,12 +88,14 @@ class DescriptorPlot:
         else:
             raise TypeError(ubid)
 
+        names = list(agg.index.get_level_values('name').unique())
+        fig, axes = plt.subplots(1, len(names))
+        print(local)
+        _suptitle(fig, self.matches.__name__, local)
+
         agg: gpd.GeoDataFrame
         groups: Iterable[pd.Index] = agg.groupby('ubid').groups.values()
         agg = _pseudo_colormap(groups, agg)
-
-        names = list(agg.index.get_level_values('name').unique())
-        fig, axes = plt.subplots(1, len(names))
 
         # Each name corresponds to an axis; for each unique UBID with that name, plot with the color and hatch
         for name, axis in zip(names, axes):
@@ -94,14 +107,84 @@ class DescriptorPlot:
                 for centroid, iloc in zip(subagg['centroid'], subagg['iloc']):
                     axis.annotate(str(iloc), xy=(float(centroid.x), float(centroid.y)))
 
+    def _aggregate_from_string(self, string: str) -> GeoDataFrame:
+        if string == 'footprint' or string == 'footprints':
+            return self._instance.footprints
+        else:
+            return self._instance.aggregate.xs(string, level='name', drop_level=True)
+
+    def containment(self, of, within, annotation='iloc'):
+        locale = locals()
+        fig, ax = plt.subplots(1, 1)
+        _suptitle(fig, self.containment.__name__, locale)
+        ax.set_title(f'{of}.aggregate (unmatched grey); {within}.aggregate boundary;')
+
+        from validate_osm.compare.compare import Compare
+        compare: Compare = self._instance
+
+        of = self._aggregate_from_string(of)
+        within = self._aggregate_from_string(within)
+        within = within[within.index.isin(set(of.index))]
+        overlap = compare.containment(of, within)
+        of = of.assign(overlap=overlap)
+
+        of[of['overlap'].notna()].plot(cmap='RdYlGn', column='overlap', ax=ax, legend=True)
+        of[of['overlap'].isna()].plot(color='gray', ax=ax)
+        within.geometry.boundary.plot(ax=ax)
+        #
+
+        if annotation:
+            of = of.sort_values('overlap', ascending=True)
+            bottom_5 = math.floor(len(of) * .05)
+            of = of.iloc[:bottom_5]
+            for centroid, iloc in zip(of['centroid'], of[annotation]):
+                ax.annotate(str(iloc), xy=(float(centroid.x), float(centroid.y)), color='blue', fontsize=14)
+
+    # TODO: Perpetrator is largest completion in a footprint
+
+    def completion(self, of, annotation='iloc'):
+        locale = locals()
+        fig, ax = plt.subplots(1,1)
+        _suptitle(fig, self.completion.__name__, locale)
+        ax.set_title(f'completion of {of}.aggregate within footprints')
+
+
+        from validate_osm.compare.compare import Compare
+        compare: Compare = self._instance
+
+        of = self._aggregate_from_string(of)
+        of = of.assign(completion=compare.completion(of))
+
+        of.plot(cmap='RdYlGn', column='completion', ax=ax, legend=True)
+        footprints = compare.footprints
+        footprints = footprints[footprints.index.isin(set(of.index.get_level_values('ubid')))]
+        footprints.geometry.boundary.plot(ax=ax)
+
+        if annotation:
+            of = of.sort_values('completion', ascending=True)
+            bottom_5 = math.floor(len(of) * .05)
+            of = of.iloc[:bottom_5]
+            for centroid, a in zip(of['centroid'], of[annotation]):
+                ax.annotate(str(a), xy=(float(centroid.x), float(centroid.y)), color='blue', fontsize=14)
+
+
+
+
     def matched(self, name: Hashable, others: Optional[Hashable] = None, annotation: Optional[str] = 'iloc'):
+        local = locals()
+        fig, ax = plt.subplots(1, 1)
+        _suptitle(fig, self.matched.__name__, local)
+        ax.set_title(f'{name}.agg ')
         from validate_osm.compare.compare import Compare
         self._instance: Compare
-        gdf = self._instance.percent_overlap(name, others)
-        ax = gdf.plot(cmap='RdYlGn', column='intersection')
+        gdf = self._instance.percent_overlap_of_aggregate(name, others)
+        gdf.plot(cmap='RdYlGn', column='intersection', ax=ax)
+
         if annotation:
-            for centroid, iloc in zip(gdf['centroid'], gdf['iloc']):
+            for centroid, iloc in zip(gdf['centroid'], gdf[annotation]):
                 ax.annotate(str(iloc), xy=(float(centroid.x), float(centroid.y)))
+
+
 
     def how(self, name: str, column: Optional[Hashable] = None, ubid: Union[None, Hashable, Iterable[Hashable]] = None):
         """
@@ -111,6 +194,8 @@ class DescriptorPlot:
         :param ubid:
         :return:
         """
+        fig, (axd, axa) = plt.subplots(1, 2)
+        _suptitle(fig, self.how.__name__, locals())
         from validate_osm.compare.compare import Compare
         self._instance: Compare
         agg = self._instance.aggregate.xs(name, level='name', drop_level=False)
@@ -134,7 +219,6 @@ class DescriptorPlot:
         ubids = data.groupby('ubid').groups.values()
         data = _pseudo_colormap(ubids, data)
 
-        fig, (axd, axa) = plt.subplots(1, 2)
         axd.set_title(f'{name}.data')
         axa.set_title(f'{name}.aggregate')
         if column is None:
@@ -151,6 +235,8 @@ class DescriptorPlot:
 
     def where(self, column: str, names: Union[str, Iterable[str]] = None, annotation: Optional[str] = 'iloc'):
         # TODO: if no comparison, color is gray
+        local = locals()
+
         from validate_osm.compare.compare import Compare
         self._instance: Compare
         if isinstance(names, str):
@@ -161,6 +247,8 @@ class DescriptorPlot:
             names = list(names)
 
         fig, axes = plt.subplots(1, len(names))
+        _suptitle(fig, self.where.__name__, local)
+
         agg = self._instance.aggregate
         subaggs: dict[str, gpd.GeoDataFrame] = {
             name: agg.xs(name, level='name', drop_level=False)
@@ -179,7 +267,7 @@ class DescriptorPlot:
 
             colored: GeoDataFrame = subagg[subagg.index.get_level_values('ubid').isin(ubid)]
             grey: GeoDataFrame = subagg[~subagg.index.get_level_values('ubid').isin(ubid)]
-            others: GeoDataFrame= others[others.index.get_level_values('ubid').isin(ubid)]
+            others: GeoDataFrame = others[others.index.get_level_values('ubid').isin(ubid)]
 
             other_values = {
                 ubid: value

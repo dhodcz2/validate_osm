@@ -12,7 +12,7 @@ class DescriptorValidate:
         return self
 
     def __call__(self, *args, **kwargs):
-        # TODO: Permforn analytics (in)validating OSM entries
+        # TODO: Perform analytics (in)validating OSM entries
         ...
 
     def __enter__(self):

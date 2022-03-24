@@ -20,6 +20,8 @@ from validate_osm.source.source import Source
 
 logger = logging.getLogger(__name__.partition('.')[0])
 
+# TODO: Apache Airflow scheduling for new OSM entries
+
 class SourceOSM(Source, abc.ABC):
     resource = DynamicOverpassResource()
 
