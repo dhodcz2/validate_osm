@@ -82,21 +82,27 @@ class Compare:
     @redo.setter
     def redo(self, names: Union[None, str, Iterable]):
         if names is None or names is False:
-            self._redo = {}
+            self._redo = frozenset()
         elif isinstance(names, str):
             self._redo = frozenset((names,))
         elif isinstance(names, Iterable):
             self._redo = frozenset(names)
         elif names is True:
-            self._redo = {'data', 'footprint', 'aggregate', *self.sources.keys()}
+            self._redo = frozenset(('data', 'footprint', 'aggregate', *self.sources.keys()))
         else:
             raise TypeError(names)
+        if 'sources' in self._redo or 'source' in self._redo:
+            self._redo = frozenset((*self.sources.keys(), *self._redo))
         for name, source in self.sources.items():
-            source.redo = name in self._redo
+            if name in self._redo:
+                self._redo = frozenset(('data', 'aggregate', *self._redo))
+                source.redo = True
+            else:
+                source.redo = False
 
     @redo.deleter
     def redo(self):
-        self._redo = {}
+        self._redo = frozenset()
 
     @property
     def footprint(self) -> CallableFootprint:
@@ -288,6 +294,19 @@ class Compare:
             overlaps.get(ubid, np.nan)
             for ubid in of.index
         ), index=of.index, dtype='float64')
+
+    def percent_difference(self, of: GeoDataFrame, according_to: GeoDataFrame, regarding: Hashable):
+        values = {
+            ubid: value
+            for ubid, value in zip(according_to.index, according_to[regarding])
+        }
+
+        return pd.Series((
+
+        ))
+
+    def scaled_percent_difference(self):
+        raise NotImplementedError
 
 
 """

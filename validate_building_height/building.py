@@ -97,7 +97,7 @@ class BuildingSource(Source):
         #
         return None
 
-    @data('object')
+    @data('string')
     @abc.abstractmethod
     def address(self):
         """The address of the building"""

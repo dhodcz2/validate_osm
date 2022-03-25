@@ -16,9 +16,8 @@ chicago = BBox([41.83099018739837, -87.66603456346172, 41.90990199281114, -87.59
 CompareChicago: Type[Compare] = partial(
     Compare,
     chicago,
-    HeightOSM, HeightChicagoBuildingFootprints, SourceMSBuildingFootprints,
+    HeightOSM, HeightChicagoBuildingFootprints,
     verbose=True,
-    # debug=True works and contains more detailed information
 )
 
 CompareUIC: Type[Compare] = partial(
@@ -43,7 +42,12 @@ if __name__ == '__main__':
     compare = CompareChicago()
     from validate_osm.source.source import BBox
 
+
     bbox = BBox((41.87562863242608, -87.63515367506594, 41.88690149672215, -87.62048834003896), crs='epsg:4326')
     loop = compare[bbox]
+    loop.plot.completion('osm')
     # loop.plot.how(name='msbf')
-    loop.plot.where(column='height_m')
+    # loop.plot.where(column='height_m')
+    # loop.plot.containment('osm', 'cbf')
+    # loop.overlap('osm', 'cbf')
+    # loop.plot.matches(annotation=False, redo=['data', 'aggregate'])

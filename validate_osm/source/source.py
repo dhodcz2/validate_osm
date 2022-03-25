@@ -142,12 +142,12 @@ class Source(abc.ABC, metaclass=SourceMeta):
         # handler.setFormatter(formatter)
         # self.logger.addHandler(handler)
 
-    def __contains__(self, item) -> bool:
-        return item in self.__class__.resource
+    # def __contains__(self, item) -> bool:
+    #     return item in self.__class__.resource
 
-    def __eq__(self, other):
-        # TODO: True if the sources have implemented all of the same data methods
-        raise NotImplementedError
+    # def __eq__(self, other):
+    #     TODO: True if the sources have implemented all of the same data methods
+    #     raise NotImplementedError
 
     '''
     raw >> data >> groups >> aggregate >> identity >> exclude >> batch
@@ -232,10 +232,18 @@ class Source(abc.ABC, metaclass=SourceMeta):
                 .centroid
         )
 
-    @DecoratorData(dtype='geometry', crs=None, dependent='centroid')
+    @DecoratorData(dtype='string', crs=None, dependent='centroid')
     def ref(self):
-        loc = self.data['centroid'].notna()
-        return GeoSeries((
-            shapely.geometry.Point(centroid.y, centroid.x)
-            for centroid in self.data.loc[loc, 'centroid'].to_crs(4326)
-        ), index=self.data.loc[loc].index)
+        return pd.Series((
+            f'{centroid.y:.4f}\n{centroid.x:.4f}'
+            if centroid is not None
+            else ''
+            for centroid in self.data['centroid'].to_crs(4326)
+        ), index=self.data.index, dtype='string')
+
+
+        # loc = self.data['centroid'].notna()
+        # return GeoSeries((
+        #     shapely.geometry.Point(centroid.y, centroid.x)
+        #     for centroid in self.data.loc[loc, 'centroid'].to_crs(4326)
+        # ), index=self.data.loc[loc].index)

@@ -95,7 +95,10 @@ class DescriptorData:
                     data['group'] = np.nan
                 data = data.set_index(['name', 'id', 'group'], drop=True)
                 yield data
-                self._instance.logger.debug(f'deleting {source.name}.resource')
+                # TODO: For some reason this logger.debug was causing me errors?
+                # sourcename = source.name
+                # logger = self._instance.logger
+                # logger.debug(f'deleting {sourcename}.resource')
                 del source.data
 
         with logged_subprocess(self._instance.logger, f'concatenating {self._instance.name}.data', ):

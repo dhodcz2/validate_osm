@@ -4,12 +4,12 @@ from geopandas import GeoDataFrame
 import itertools
 
 import matplotlib.colors as mcolors
-from typing import Hashable, Optional, Iterable, Union, Iterator
+from typing import Hashable, Optional, Iterable, Union, Iterator, Any
 
 import pandas as pd
 
 COLORS = list(mcolors.TABLEAU_COLORS.values())
-HATCHES = '\ - | \\'.split()
+HATCHES = '\\ - | /'.split()
 
 import geopandas as gpd
 import matplotlib.pyplot as plt
@@ -27,7 +27,7 @@ def _pseudo_colormap(groups: Iterable[pd.Index], gdf: gpd.GeoDataFrame) -> gpd.G
         for _ in group
     ), index=index)
     hatch = pd.Series((
-        COLORS[i % lenh]
+        HATCHES[i % lenh]
         for i, group in enumerate(groups)
         for _ in group
     ), index=index)
@@ -35,14 +35,27 @@ def _pseudo_colormap(groups: Iterable[pd.Index], gdf: gpd.GeoDataFrame) -> gpd.G
     return gdf
 
 
-def _suptitle(fig, funcname, l: dict):
-    name = f'compare.plot.{funcname}'
+def _suptitle(compare, fig, funcname, l: dict):
+    name = f'{compare.name}.plot.{funcname}'
     l.pop('self')
     msg = ', '.join(f'{key}={val}' for key, val in l.items())
     fig.suptitle(f'{name}({msg})')
 
 
+def _annotate(ax, params, gdf):
+    if (annotation := params['annotation']):
+        for centroid, v in zip(gdf['centroid'].to_crs(params['crs']), gdf[annotation]):
+            if isinstance(v, float):
+                v = '%.1f' % v
+            else:
+                v = str(v)
+            ax.annotate(v, xy=(float(centroid.x), float(centroid.y)))
+
+
 class DescriptorPlot:
+    def __init__(self):
+        self.style = 'dark_background'
+
     def __get__(self, instance, owner):
         self._instance = instance
         self._owner = owner
@@ -72,26 +85,36 @@ class DescriptorPlot:
     def style(self):
         plt.style.use('default')
 
-    def matches(self, ubid=None, annotation: Optional[str] = 'iloc'):
+    @property
+    def params(self) -> dict[str, Any]:
+        if not hasattr(self, '_params'):
+            self._params = {
+                'crs': 3857,
+                'annotation': 'iloc',
+
+            }
+        return self._params
+
+    def matches(self, **kwargs):
         local = locals().copy()
-        print(local)
+        (params := self.params.copy()).update(kwargs)
         from validate_osm.compare.compare import Compare
         self._instance: Compare
         agg = self._instance.aggregate
 
-        if ubid is None:
-            pass
-        elif isinstance(ubid, Hashable):
-            agg = agg.xs(ubid, level='ubid')
-        elif isinstance(ubid, Iterable):
-            agg = agg[agg.index.isin(set(ubid))]
-        else:
-            raise TypeError(ubid)
+        # if ubid is None:
+        #     pass
+        # elif isinstance(ubid, Hashable):
+        #     agg = agg.xs(ubid, level='ubid')
+        # elif isinstance(ubid, Iterable):
+        #     agg = agg[agg.index.isin(set(ubid))]
+        # else:
+        #     raise TypeError(ubid)
 
         names = list(agg.index.get_level_values('name').unique())
         fig, axes = plt.subplots(1, len(names))
         print(local)
-        _suptitle(fig, self.matches.__name__, local)
+        _suptitle(self._instance, fig, self.matches.__name__, local)
 
         agg: gpd.GeoDataFrame
         groups: Iterable[pd.Index] = agg.groupby('ubid').groups.values()
@@ -102,21 +125,19 @@ class DescriptorPlot:
             axis.set_title(f'{name}.aggregate')
             subagg: gpd.GeoDataFrame = agg.xs(name, level='name')
             for (color, hatch), loc in subagg.groupby(['color', 'hatch']).groups.items():
-                subagg.loc[loc].geometry.plot(color=color, hatch=hatch, ax=axis)
-            if annotation:
-                for centroid, iloc in zip(subagg['centroid'], subagg['iloc']):
-                    axis.annotate(str(iloc), xy=(float(centroid.x), float(centroid.y)))
+                subagg.loc[loc, 'geometry'] \
+                    .to_crs(params['crs']) \
+                    .plot(color=color, hatch=hatch, ax=axis)
+            _annotate(axis, params, subagg)
+            # if (annotation := params['annotation']):
+            #     for centroid, iloc in zip(subagg['centroid'].to_crs(params['crs']), subagg[annotation]):
+            #         axis.annotate(str(iloc), xy=(float(centroid.x), float(centroid.y)))
 
-    def _aggregate_from_string(self, string: str) -> GeoDataFrame:
-        if string == 'footprint' or string == 'footprints':
-            return self._instance.footprints
-        else:
-            return self._instance.aggregate.xs(string, level='name', drop_level=True)
-
-    def containment(self, of, within, annotation='iloc'):
+    def containment(self, of, within, **kwargs):
         locale = locals()
+        (params := self.params.copy()).update(kwargs)
         fig, ax = plt.subplots(1, 1)
-        _suptitle(fig, self.containment.__name__, locale)
+        _suptitle(self._instance, fig, self.containment.__name__, locale)
         ax.set_title(f'{of}.aggregate (unmatched grey); {within}.aggregate boundary;')
 
         from validate_osm.compare.compare import Compare
@@ -133,7 +154,7 @@ class DescriptorPlot:
         within.geometry.boundary.plot(ax=ax)
         #
 
-        if annotation:
+        if (annotation := params['annotation']):
             of = of.sort_values('overlap', ascending=True)
             bottom_5 = math.floor(len(of) * .05)
             of = of.iloc[:bottom_5]
@@ -142,12 +163,12 @@ class DescriptorPlot:
 
     # TODO: Perpetrator is largest completion in a footprint
 
-    def completion(self, of, annotation='iloc'):
+    def completion(self, of, **kwargs):
         locale = locals()
-        fig, ax = plt.subplots(1,1)
-        _suptitle(fig, self.completion.__name__, locale)
+        (params := self.params.copy()).update(kwargs)
+        fig, ax = plt.subplots(1, 1)
+        _suptitle(self._instance, fig, self.completion.__name__, locale)
         ax.set_title(f'completion of {of}.aggregate within footprints')
-
 
         from validate_osm.compare.compare import Compare
         compare: Compare = self._instance
@@ -155,25 +176,27 @@ class DescriptorPlot:
         of = self._aggregate_from_string(of)
         of = of.assign(completion=compare.completion(of))
 
-        of.plot(cmap='RdYlGn', column='completion', ax=ax, legend=True)
+        # of.plot(cmap='RdYlGn', column='completion', ax=ax, legend=True)
+
+        of.to_crs(params['crs']).plot(cmap='RdYlGn', column='completion', ax=ax, legend=True)
+        # of.geometry.to_crs(params['crs']).plot(cmap='RdYlGn', column='completion', ax=ax, legend=True)
+
         footprints = compare.footprints
         footprints = footprints[footprints.index.isin(set(of.index.get_level_values('ubid')))]
-        footprints.geometry.boundary.plot(ax=ax)
+        footprints.geometry.to_crs(params['crs']).boundary.plot(ax=ax)
 
-        if annotation:
-            of = of.sort_values('completion', ascending=True)
-            bottom_5 = math.floor(len(of) * .05)
-            of = of.iloc[:bottom_5]
-            for centroid, a in zip(of['centroid'], of[annotation]):
-                ax.annotate(str(a), xy=(float(centroid.x), float(centroid.y)), color='blue', fontsize=14)
-
-
-
+        _annotate(ax, params, of)
+        # if annotation:
+        #     of = of.sort_values('completion', ascending=True)
+        #     bottom_5 = math.floor(len(of) * .05)
+        #     of = of.iloc[:bottom_5]
+        #     for centroid, a in zip(of['centroid'], of[annotation]):
+        #         ax.annotate(str(a), xy=(float(centroid.x), float(centroid.y)), color='blue', fontsize=14)
 
     def matched(self, name: Hashable, others: Optional[Hashable] = None, annotation: Optional[str] = 'iloc'):
         local = locals()
         fig, ax = plt.subplots(1, 1)
-        _suptitle(fig, self.matched.__name__, local)
+        _suptitle(self._instance, fig, self.matched.__name__, local)
         ax.set_title(f'{name}.agg ')
         from validate_osm.compare.compare import Compare
         self._instance: Compare
@@ -184,8 +207,6 @@ class DescriptorPlot:
             for centroid, iloc in zip(gdf['centroid'], gdf[annotation]):
                 ax.annotate(str(iloc), xy=(float(centroid.x), float(centroid.y)))
 
-
-
     def how(self, name: str, column: Optional[Hashable] = None, ubid: Union[None, Hashable, Iterable[Hashable]] = None):
         """
         Plots how data was grouped to form an aggregate
@@ -195,7 +216,7 @@ class DescriptorPlot:
         :return:
         """
         fig, (axd, axa) = plt.subplots(1, 2)
-        _suptitle(fig, self.how.__name__, locals())
+        _suptitle(self._instance, fig, self.how.__name__, locals())
         from validate_osm.compare.compare import Compare
         self._instance: Compare
         agg = self._instance.aggregate.xs(name, level='name', drop_level=False)
@@ -247,7 +268,7 @@ class DescriptorPlot:
             names = list(names)
 
         fig, axes = plt.subplots(1, len(names))
-        _suptitle(fig, self.where.__name__, local)
+        _suptitle(self._instance, fig, self.where.__name__, local)
 
         agg = self._instance.aggregate
         subaggs: dict[str, gpd.GeoDataFrame] = {
@@ -295,3 +316,9 @@ class DescriptorPlot:
                 for c, p, a in zip(colored['centroid'], colored['percent_error'], colored[annotation]):
                     if p < .50:
                         ax.annotate(str(a), xy=(float(c.x), float(c.y)), color='black')
+
+    def _aggregate_from_string(self, string: str) -> GeoDataFrame:
+        if string == 'footprint' or string == 'footprints':
+            return self._instance.footprints
+        else:
+            return self._instance.aggregate.xs(string, level='name', drop_level=True)

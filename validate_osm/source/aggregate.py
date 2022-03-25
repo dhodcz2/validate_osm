@@ -1,9 +1,11 @@
 import functools
 import itertools
 import logging
-from typing import Callable, Collection
+from typing import Callable, Collection, Iterator
 
 import networkx
+import pandas as pd
+import shapely.geometry
 from geopandas import GeoDataFrame, GeoSeries
 from networkx import connected_components
 
@@ -119,17 +121,24 @@ class AggregateFactory:
         return GeoSeries(data=data(), index=self._groups.index, crs=3857)
 
     def ref(self):
-        def data():
-            yield from self._groups.ungrouped['ref']
-            multi = (
-                gdf['ref'].unary_union
-                for gdf in self._groups.grouped
-            )
-            multi = (
-                None if union is None
-                else union.centroid
-                for union in multi
-            )
-            yield from multi
+        single = self._groups.ungrouped['ref']
+        # temp = self._groups.data.copy()
+        # self._groups.data = temp.assign(centroid=temp['centroid'].to_crs(4326))
+        # TODO: This is perhaps suboptimal because calling several to_crs seems inefficient
+        centroids: Iterator[shapely.geometry.Point] = (
+            gdf['centroid'].to_crs(4326).unary_union.centroid
+            for gdf in self._groups.grouped
+        )
+        multi: Iterator[str] = (
+            f'{centroid.y:.4f}\n{centroid.x:.4f}'
+            if centroid is not None else ''
+            for centroid in centroids
+        )
+        series = pd.Series(
+            itertools.chain(single, multi),
+            index=self._groups.index,
+            dtype='string'
+        )
+        # self._groups.data = temp
+        return series
 
-        return GeoSeries(data=data(), index=self._groups.index)

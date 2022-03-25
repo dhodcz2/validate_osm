@@ -18,6 +18,8 @@ from shapely.geometry.base import BaseGeometry
 from validate_osm.util.scripts import logged_subprocess
 
 # TODO: Perhaps the footprints can be accelerated with multiprocessing over the Summer
+#   where annoy.get is called for every entry and a a N x 30 matrix is created;
+#   because the geometry cannot be multiprocessed, the geometric testing is done in serial
 
 class CallableFootprint:
     def __init__(self, compare: object):

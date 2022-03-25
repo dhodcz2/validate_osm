@@ -10,3 +10,10 @@
 # ChicagoBuildingFootprints
 # )
 #
+from validate_building_height.compare import (
+    Compare,
+    CompareUIC,
+    CompareRio,
+    CompareChicago,
+    BBox,
+)
