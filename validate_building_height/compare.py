@@ -35,9 +35,6 @@ CompareRio: Type[Compare] = partial(
     verbose=True,
 )
 
-# TODO: Still some situations where multiple Compare.logger handlers
-# TODO: Compare[bbox] returns a smaller Compare instance
-
 if __name__ == '__main__':
     compare = CompareChicago()
     from validate_osm.source.source import BBox
@@ -45,7 +42,11 @@ if __name__ == '__main__':
 
     bbox = BBox((41.87562863242608, -87.63515367506594, 41.88690149672215, -87.62048834003896), crs='epsg:4326')
     loop = compare[bbox]
-    loop.plot.completion('osm')
+    loop.plot.difference_percent('osm', 'cbf')
+    # loop.plot.quality('osm', 'cbf')
+    # loop.plot.difference_percent('osm', 'cbf', 'height_m')
+    # loop.difference_percent('osm', 'cbf', 'height_m')
+    # loop.plot.completion('osm')
     # loop.plot.how(name='msbf')
     # loop.plot.where(column='height_m')
     # loop.plot.containment('osm', 'cbf')

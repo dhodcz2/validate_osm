@@ -2,18 +2,19 @@ import functools
 import inspect
 import logging
 from pathlib import Path
-from typing import Union, Iterable, Type, Hashable, Optional, Iterator
+from typing import Union, Iterable, Type, Iterator, Optional
 
-import geopandas as gpd
 import numpy as np
 import pandas as pd
+import shapely.geometry.base
 from geopandas import GeoDataFrame
+from geopandas import GeoSeries
 from python_log_indenter import IndentedLoggerAdapter
 
-from validate_osm.compare.validate import DescriptorValidate
 from validate_osm.compare.aggregate import DescriptorAggregate
 from validate_osm.compare.data import DescriptorData
 from validate_osm.compare.plot import DescriptorPlot
+from validate_osm.compare.validate import DescriptorValidate
 from validate_osm.source.footprint import CallableFootprint
 from validate_osm.source.source import (
     Source, BBox
@@ -123,11 +124,34 @@ class Compare:
     def footprints(self) -> GeoDataFrame:
         return self.footprint.gdf
 
+    @property
+    def index(self) -> int | str:
+        # TODO: Dynamically determine from Sources
+        return 'ubid'
+
+    def _get_index_values(self, gdf: Union[GeoDataFrame, GeoSeries]) -> Iterable[int | str]:
+        return gdf.index.get_level_values(level=self.index) if isinstance(gdf.index, pd.MultiIndex) else gdf.index
+
+    def xs(self, key: Union[int | str, pd.Series, pd.DataFrame]) -> GeoDataFrame:
+        if isinstance(key, pd.DataFrame):
+            return key
+        if isinstance(key, (pd.Series)):
+            return GeoDataFrame(key)
+        if 'footprint' == key or key == 'footprints':
+            return self.footprints
+        if key in self.names:
+            return self.aggregate.xs(key, level='name', drop_level=False)
+        return self.aggregate.xs(key, level=self.index, drop_level=False)
+
     @functools.cached_property
     def name(self) -> str:
         names = list(self.sources.keys())
         names.sort()
         return '_'.join(names)
+
+    @functools.cached_property
+    def names(self) -> set[str]:
+        return set(self.sources.keys())
 
     def __repr__(self):
         return f'{self.__class__.__name__}[{self.name}]'
@@ -200,7 +224,7 @@ class Compare:
     def directory(self) -> Path:
         return Path(inspect.getfile(self.__class__)).parent / self.name
 
-    def matched(self, name: Union[None, Hashable, Iterable[Hashable]] = None) -> GeoDataFrame:
+    def matched(self, name: Union[None, int | str, Iterable[int | str]] = None) -> GeoDataFrame:
         """
         Returns compare.aggregate where aggregate.name has matching ubid
         :param name:
@@ -215,7 +239,7 @@ class Compare:
                 if len(group) == 1
             )
             return agg.iloc[singles]
-        elif isinstance(name, Hashable):
+        elif isinstance(name, int | str):
             others: GeoDataFrame = agg[agg.index.get_level_values('name') != name]
             agg: GeoDataFrame = agg[agg.index.get_level_values('name') == name]
         elif isinstance(name, Iterable):
@@ -228,7 +252,7 @@ class Compare:
         ubids = set(agg.index.get_level_values('ubid').intersection(others.index.get_level_values('ubid')))
         return agg[agg.index.get_level_values('ubid').isin(ubids)]
 
-    def unmatched(self, name: Optional[Hashable]):
+    def unmatched(self, name: Optional[int | str]):
         """
         Returns compare.aggregate where aggregate.name has no matching ubid
         :param name:
@@ -243,7 +267,7 @@ class Compare:
                 if len(group) == 1
             )
             return agg.iloc[singles]
-        elif isinstance(name, Hashable):
+        elif isinstance(name, int | str):
             others: GeoDataFrame = agg[agg.index.get_level_values('name') != name]
             agg: GeoDataFrame = agg[agg.index.get_level_values('name') == name]
         elif isinstance(name, Iterable):
@@ -256,8 +280,8 @@ class Compare:
         ubids = set(agg.index.get_level_values('ubid').difference(others.index.get_level_values('ubid')))
         return agg[agg.index.get_level_values('ubid').isin(ubids)]
 
-    def match_rate(self, name: Union[Hashable, Iterable[Hashable],]) -> float:
-        if isinstance(name, Hashable):
+    def match_rate(self, name: Union[int | str, Iterable[int | str],]) -> float:
+        if isinstance(name, int | str):
             agg = self.aggregate.xs(name, level='name')
             return len(self.matched(name)) / len(agg)
         elif isinstance(name, Iterable):
@@ -268,58 +292,127 @@ class Compare:
         else:
             raise TypeError(name)
 
-    def containment(self, of: GeoDataFrame, within: GeoDataFrame) -> pd.Series:
-        geometries = {
-            ubid: geom
-            for ubid, geom in zip(within.index, within['geometry'])
+    def containment(self, of, in_) -> pd.Series:
+        of: GeoDataFrame = self.xs(of)
+        in_: GeoDataFrame = self.xs(in_)
+
+        area: dict[int | str, float] = {
+            ubid: area
+            for ubid, area in zip(self._get_index_values(of), of.area)
+        }
+        in_: dict[int | str, shapely.geometry.base.BaseGeometry] = {
+            i: geom
+            for i, geom in zip(self._get_index_values(in_), in_.geometry)
+        }
+        of: dict[int | str, shapely.geometry.base.BaseGeometry] = {
+            i: geom
+            for i, geom in zip(self._get_index_values(of), of.geometry)
+            if i in in_
+        }
+        return pd.Series((
+            g.intersection(in_[i]).area / area[i]
+            for i, g in of.items()
+        ), index=pd.Index(of.keys(), name=self.index), dtype='float64')
+
+    def difference_percent(self, of, and_, value: int | str) -> pd.Series:
+        of = self.xs(of)
+        of = of[of[value].notna()]
+        and_ = self.xs(and_)
+        and_ = and_[and_[value].notna()]
+
+        of = {
+            i: val
+            for i, val in zip(self._get_index_values(of), of[value])
+        }
+        and_ = {
+            i: val
+            for i, val in zip(self._get_index_values(and_), and_[value])
+            if i in of
         }
 
         def gen():
-            for ubid, g, a, in zip(of.index, of['geometry'], of.area):
-                if ubid in geometries:
-                    yield g.intersection(geometries[ubid]).area / a
+            for i, a in and_.items():
+                b = of[i]
+                if a > b:
+                    yield (a - b) / a
                 else:
-                    yield np.nan
+                    yield (b - a) / b
 
-        return pd.Series(gen(), index=of.index, dtype='float64')
+        return pd.Series(gen(), index=pd.Index(and_.keys(), name=self.index), dtype='float64')
 
-    def completion(self, of: GeoDataFrame) -> pd.Series:
-        overlap = self.containment(of=self.footprints, within=of)  # of=footprints is not a mistake
-        overlaps = {
-            ubid: overlap
-            for ubid, overlap in zip(overlap.index, overlap)
+    def difference_absolute(self, of, and_, value: int | str) -> pd.Series:
+        of: GeoDataFrame = self.xs(of)
+        of: GeoDataFrame = of[of[value].notna()]
+        and_: GeoDataFrame = self.xs(and_)
+        and_: GeoDataFrame = and_[and_[value].notna()]
+
+        of: dict[int | str, float] = {
+            i: val
+            for i, val in zip(self._get_index_values(of), of[value])
+        }
+        and_: dict[int | str, float] = {
+            i: val
+            for i, val in zip(self._get_index_values(and_), and_[value])
+            if i in of
         }
 
-        return pd.Series((
-            overlaps.get(ubid, np.nan)
-            for ubid in of.index
-        ), index=of.index, dtype='float64')
+        def gen():
+            for i, a in and_.item():
+                b = of[i]
+                if a > b:
+                    yield a - b
+                else:
+                    yield b - a
 
-    def percent_difference(self, of: GeoDataFrame, according_to: GeoDataFrame, regarding: Hashable):
-        values = {
-            ubid: value
-            for ubid, value in zip(according_to.index, according_to[regarding])
+        return pd.Series(gen(), index=pd.Index(and_.keys(), name=self.index), dtype='float64')
+
+    def difference_scaled(self, of, and_, value: int | str) -> pd.Series:
+        difference = self.difference_percent(of, and_, value)
+        containment = self.containment(of, and_)
+        result = difference * containment
+        result = result[result.notna()]
+        return result
+
+
+    def intersection(self, of, and_) -> GeoSeries:
+        of: GeoDataFrame = self.xs(of)
+        and_: GeoDataFrame = self.xs(and_)
+        crs = of.crs
+        of: dict[str, shapely.geometry.base.BaseGeometry] = {
+            ubid: geom
+            for ubid, geom in zip(self._get_index_values(of), of.geometry)
+        }
+        and_: dict[str, shapely.geometry.base.BaseGeometry] = {
+            ubid: geom
+            for ubid, geom in zip(self._get_index_values(and_), and_.geometry)
+            if ubid in of
         }
 
-        return pd.Series((
+        return GeoSeries((
+            geom.intersection(of[i])
+            for i, geom in and_.items()
+        ), index=pd.Index(and_.keys(), name=self.index), crs=crs, name='geometry')
 
-        ))
+    def union(self, of, and_) -> GeoSeries:
+        of = self.xs(of)
+        and_ = self.xs(and_)
+        crs = of.crs
+        of: dict[str, shapely.geometry.base.BaseGeometry] = {
+            i: geom
+            for i, geom in zip(self._get_index_values(of), of.geometry)
+        }
+        and_: dict[str, shapely.geometry.base.BaseGeometry] = {
+            i: geom
+            for i, geom in zip(self._get_index_values(and_), and_.geometry)
+            if i in of
+        }
 
-    def scaled_percent_difference(self):
-        raise NotImplementedError
+        return GeoSeries((
+            geom.union(of[i])
+            for i, geom in and_.items()
+        ), index=pd.Index(and_.keys(), name=self.index), crs=crs, name='geometry')
 
-
-"""
-1.  Compare.data
-    data
-    with self:
-        with compare.footprint as footprint:
-            data = footprint(data)
-        self._data = data
-        
-    with compare.footprint as footprint:
-        return footprint(data)
-        
-2.  Compare.footprint
-        compare.data
-"""
+    def quality(self, of, and_) -> pd.Series:
+        union = self.union(of, and_)
+        intersection = self.intersection(of, and_)
+        return self.containment(of=intersection, in_=union)

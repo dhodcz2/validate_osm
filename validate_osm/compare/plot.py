@@ -4,7 +4,7 @@ from geopandas import GeoDataFrame
 import itertools
 
 import matplotlib.colors as mcolors
-from typing import Hashable, Optional, Iterable, Union, Iterator, Any
+from typing import Hashable, Optional, Iterable, Union, Iterator, Any, Callable
 
 import pandas as pd
 
@@ -60,6 +60,10 @@ class DescriptorPlot:
         self._instance = instance
         self._owner = owner
         return self
+
+    @property
+    def xs(self) -> Callable[[Hashable], GeoDataFrame]:
+        return self._instance.xs
 
     @property
     def figsize(self):
@@ -143,8 +147,8 @@ class DescriptorPlot:
         from validate_osm.compare.compare import Compare
         compare: Compare = self._instance
 
-        of = self._aggregate_from_string(of)
-        within = self._aggregate_from_string(within)
+        of = self.xs(of)
+        within = self.xs(within)
         within = within[within.index.isin(set(of.index))]
         overlap = compare.containment(of, within)
         of = of.assign(overlap=overlap)
@@ -173,7 +177,7 @@ class DescriptorPlot:
         from validate_osm.compare.compare import Compare
         compare: Compare = self._instance
 
-        of = self._aggregate_from_string(of)
+        of = self.xs(of)
         of = of.assign(completion=compare.completion(of))
 
         # of.plot(cmap='RdYlGn', column='completion', ax=ax, legend=True)
@@ -186,12 +190,92 @@ class DescriptorPlot:
         footprints.geometry.to_crs(params['crs']).boundary.plot(ax=ax)
 
         _annotate(ax, params, of)
-        # if annotation:
-        #     of = of.sort_values('completion', ascending=True)
-        #     bottom_5 = math.floor(len(of) * .05)
-        #     of = of.iloc[:bottom_5]
-        #     for centroid, a in zip(of['centroid'], of[annotation]):
-        #         ax.annotate(str(a), xy=(float(centroid.x), float(centroid.y)), color='blue', fontsize=14)
+
+    def quality(self, of, and_, **kwargs):
+        locale = locals()
+        from validate_osm.compare.compare import Compare
+        compare: Compare = self._instance
+
+        (params := self.params.copy()).update(kwargs)
+        fig, ax = plt.subplots(1, 1)
+        _suptitle(self._instance, fig, self._instance.plot.quality.__name__, locale)
+        ax.set_title(f'intersection area of {of} and {and_}')
+
+        from validate_osm.compare.compare import Compare
+        compare: Compare = self._instance
+
+        union = compare.union(of, and_)
+        intersection = compare.intersection(of, and_)
+        quality = compare.containment(of=union, in_=intersection)
+
+        gdf = GeoDataFrame({
+            'geometry': intersection,
+            'quality': quality,
+            'centroid': intersection.centroid,
+            # 'iloc': compare.footprints['iloc']
+        })
+        gdf['iloc'] = compare.footprints['iloc']
+
+        gdf.plot(cmap='RdYlGn', column='quality', ax=ax, legend=True)
+        union.boundary.plot(ax=ax)
+        _annotate(ax, params, gdf)
+
+
+    def difference_percent(self, of, and_, value, **kwargs):
+        locale = locals()
+        (params := self.params.copy()).update(kwargs)
+        from validate_osm.compare import Compare
+        compare: Compare = self._instance
+        fig,ax = plt.subplots(1,1)
+        _suptitle(compare, fig, compare.plot.difference_percent.__name__, locale)
+
+        difference = compare.difference_percent(of, and_, value)
+        union = compare.union(of, and_).loc[difference.index]
+        intersection = compare.intersection(of, and_).loc[difference.index]
+
+        gdf = GeoDataFrame({
+            'geometry': intersection,
+            'difference': difference,
+            'centroid': intersection.centroid
+        })
+        gdf['iloc'] = compare.footprints['iloc']
+
+        gdf.plot(cmap='RdYlGn_r', column='difference', ax=ax, legend=True)
+        union.boundary.plot(ax=ax)
+        _annotate(ax, params, gdf)
+
+
+    def difference_scaled(self, of, and_, value, **kwargs):
+        locale = locals()
+        (params := self.params.copy()).update(kwargs)
+        from validate_osm.compare import Compare
+        compare: Compare = self._instance
+        fig, ax = plt.subplots(1,1)
+        _suptitle(compare, fig, compare.plot.difference_scaled.__name__, locale)
+
+        difference = compare.difference_scaled(of, and_, value)
+        union = compare.union(of, and_).loc[difference.index]
+        intersection = compare.intersection(of, and_).loc[difference.index]
+
+        gdf = GeoDataFrame({
+            'geometry': intersection,
+            'difference': difference,
+            'centroid': intersection.centroid
+        })
+        gdf['iloc'] = compare.footprints['iloc']
+
+        gdf.plot(cmap='RdYlGn_r', column='difference', ax = ax, legend = True)
+        union.boundary.plot(ax=ax),
+        _annotate(ax, params, gdf)
+
+        # difference = compare.difference_scaled(of, and_, value)
+        # footprints: GeoDataFrame = compare.footprints.loc[difference.index].assign(
+        #     difference=difference
+        # )
+        #
+        # footprints.to_crs(params['crs']).plot(cmap='RdYlGn_r', column='difference', ax=ax, legend=True)
+        # _annotate(ax, params, footprints)
+        #
 
     def matched(self, name: Hashable, others: Optional[Hashable] = None, annotation: Optional[str] = 'iloc'):
         local = locals()
@@ -283,7 +367,7 @@ class DescriptorPlot:
 
             ubid = set(
                 subagg[subagg[column].notna()].index.get_level_values('ubid')
-                    .intersection(others.index.get_level_values('ubid'))
+                    .quality(others.index.get_level_values('ubid'))
             )
 
             colored: GeoDataFrame = subagg[subagg.index.get_level_values('ubid').isin(ubid)]
@@ -317,8 +401,8 @@ class DescriptorPlot:
                     if p < .50:
                         ax.annotate(str(a), xy=(float(c.x), float(c.y)), color='black')
 
-    def _aggregate_from_string(self, string: str) -> GeoDataFrame:
-        if string == 'footprint' or string == 'footprints':
-            return self._instance.footprints
-        else:
-            return self._instance.aggregate.xs(string, level='name', drop_level=True)
+    # def _aggregate_from_string(self, string: str) -> GeoDataFrame:
+    #     if string == 'footprint' or string == 'footprints':
+    #         return self._instance.footprints
+    #     else:
+    #         return self._instance.aggregate.xs(string, level='name', drop_level=True)
