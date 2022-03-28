@@ -220,37 +220,57 @@ class DescriptorPlot:
         union.boundary.plot(ax=ax)
         _annotate(ax, params, gdf)
 
-
-    def difference_percent(self, of, and_, value, **kwargs):
+    def difference_percent(self, of, and_, values, **kwargs):
         locale = locals()
         (params := self.params.copy()).update(kwargs)
         from validate_osm.compare import Compare
         compare: Compare = self._instance
-        fig,ax = plt.subplots(1,1)
+        fig, ax = plt.subplots(1, 1)
         _suptitle(compare, fig, compare.plot.difference_percent.__name__, locale)
 
-        difference = compare.difference_percent(of, and_, value)
+        if not isinstance(of, str) or not isinstance(and_, str):
+            raise TypeError
+
+        difference = compare.matrix.percent_difference(rows=of, columns=and_, values=values)
+        difference = difference.reset_index('name', drop=True)[and_]
+        # difference = difference.reset_index(compar, level='name', drop=True)[and_]
         union = compare.union(of, and_).loc[difference.index]
         intersection = compare.intersection(of, and_).loc[difference.index]
+        iloc = compare.footprints.loc[difference.index, 'iloc']
 
         gdf = GeoDataFrame({
             'geometry': intersection,
             'difference': difference,
-            'centroid': intersection.centroid
+            'centroid': intersection.centroid,
+            'iloc': iloc
         })
-        gdf['iloc'] = compare.footprints['iloc']
 
         gdf.plot(cmap='RdYlGn_r', column='difference', ax=ax, legend=True)
         union.boundary.plot(ax=ax)
         _annotate(ax, params, gdf)
 
+        # difference = compare.difference_percent(of, and_, value)
+        # union = compare.union(of, and_).loc[difference.index]
+        # intersection = compare.intersection(of, and_).loc[difference.index]
+        #
+        # gdf = GeoDataFrame({
+        #     'geometry': intersection,
+        #     'difference': difference,
+        #     'centroid': intersection.centroid
+        # })
+        # gdf['iloc'] = compare.footprints['iloc']
+        #
+        # gdf.plot(cmap='RdYlGn_r', column='difference', ax=ax, legend=True)
+        # union.boundary.plot(ax=ax)
+        # _annotate(ax, params, gdf)
+        #
 
     def difference_scaled(self, of, and_, value, **kwargs):
         locale = locals()
         (params := self.params.copy()).update(kwargs)
         from validate_osm.compare import Compare
         compare: Compare = self._instance
-        fig, ax = plt.subplots(1,1)
+        fig, ax = plt.subplots(1, 1)
         _suptitle(compare, fig, compare.plot.difference_scaled.__name__, locale)
 
         difference = compare.difference_scaled(of, and_, value)
@@ -264,7 +284,7 @@ class DescriptorPlot:
         })
         gdf['iloc'] = compare.footprints['iloc']
 
-        gdf.plot(cmap='RdYlGn_r', column='difference', ax = ax, legend = True)
+        gdf.plot(cmap='RdYlGn_r', column='difference', ax=ax, legend=True)
         union.boundary.plot(ax=ax),
         _annotate(ax, params, gdf)
 
@@ -362,11 +382,11 @@ class DescriptorPlot:
 
         for (name, subagg), ax in zip(subaggs.items(), axes):
             subagg: GeoDataFrame
-            others: gpd.GeoDataFrame = agg[agg.index.get_level_values('name') != name]
+            others: gpd.GeoDataFrame = agg[agg.identity.get_level_values('name') != name]
             others = others[others[column].notna()]
 
             ubid = set(
-                subagg[subagg[column].notna()].index.get_level_values('ubid')
+                subagg[subagg[column].notna()].identity.get_level_values('ubid')
                     .quality(others.index.get_level_values('ubid'))
             )
 

@@ -8,7 +8,7 @@ import geopandas as gpd
 import pandas as pd
 from geopandas import GeoDataFrame
 
-from validate_osm.source.aggregate import AggregateFactory
+from validate_osm.source.aggregate import FactoryAggregate
 from validate_osm.source.resource import File
 from validate_osm.source.source import Source
 from validate_osm.util.scripts import logged_subprocess
@@ -42,9 +42,9 @@ class DescriptorAggregate:
 
     # TODO: Perhaps clean up this process a bit; it seems like it can be simplified with regards to dunder methods
     @property
-    def factory(self) -> AggregateFactory:
+    def factory(self) -> FactoryAggregate:
         sources = self._instance.sources.values()
-        factories: Iterator[tuple[Type[AggregateFactory], Source]] = zip(
+        factories: Iterator[tuple[Type[FactoryAggregate], Source]] = zip(
             (source.aggregate_factory for source in sources),
             sources
         )

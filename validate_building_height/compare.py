@@ -35,20 +35,24 @@ CompareRio: Type[Compare] = partial(
     verbose=True,
 )
 
+# TODO: compare floors height_m [12, 34, 56, 78] >
+
+
 if __name__ == '__main__':
     compare = CompareChicago()
     from validate_osm.source.source import BBox
 
-
     bbox = BBox((41.87562863242608, -87.63515367506594, 41.88690149672215, -87.62048834003896), crs='epsg:4326')
     loop = compare[bbox]
-    loop.plot.difference_percent('osm', 'cbf')
-    # loop.plot.quality('osm', 'cbf')
-    # loop.plot.difference_percent('osm', 'cbf', 'height_m')
-    # loop.difference_percent('osm', 'cbf', 'height_m')
-    # loop.plot.completion('osm')
-    # loop.plot.how(name='msbf')
-    # loop.plot.where(column='height_m')
-    # loop.plot.containment('osm', 'cbf')
-    # loop.overlap('osm', 'cbf')
-    # loop.plot.matches(annotation=False, redo=['data', 'aggregate'])
+    loop.plot.difference_scaled('osm', 'cbf', value=['floors', 'height_m'])
+    # loop.matrix.percent_difference('osm', 'cbf', ['height_m', 'floors'])
+    # loop.results('osm', 'cbf')
+    # loop.floc[26]
+    # loop.plot.difference_scaled('osm', 'cbf', 'height_m')
+"""
+# output results to json
+validateosm (1 2 3 4) 'height_m' 'floors' output.csv output.json
+# push json to REST api 
+validateosm commit ./output.json
+validateosm --user dhodcz2 --password password  push 
+"""o

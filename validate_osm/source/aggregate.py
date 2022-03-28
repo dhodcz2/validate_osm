@@ -13,7 +13,7 @@ from validate_osm.source.groups import Groups
 from validate_osm.util.scripts import logged_subprocess
 
 
-class AggregateFactory:
+class FactoryAggregate:
 
     def __init__(self, compare: object):
         from validate_osm.compare.compare import Compare
@@ -130,7 +130,7 @@ class AggregateFactory:
             for gdf in self._groups.grouped
         )
         multi: Iterator[str] = (
-            f'{centroid.y:.4f}\n{centroid.x:.4f}'
+            f'{centroid.y:.4f}, {centroid.x:.4f}'
             if centroid is not None else ''
             for centroid in centroids
         )

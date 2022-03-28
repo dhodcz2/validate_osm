@@ -84,7 +84,7 @@ def plot_mismatch(mismatch: GeoDataFrame, haystack: GeoDataFrame, identifiers: l
         return true_match
 
     true_match = find_true_match(surroundings)
-    surroundings = surroundings[~surroundings.index.isin(true_match.index)]
+    surroundings = surroundings[~surroundings.identity.isin(true_match.identity)]
 
     fig, ax = plt.subplots()
     # fig: plt.figure.F, ax = plt.subplots()

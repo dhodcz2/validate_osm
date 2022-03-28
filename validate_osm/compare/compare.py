@@ -14,12 +14,13 @@ from python_log_indenter import IndentedLoggerAdapter
 from validate_osm.compare.aggregate import DescriptorAggregate
 from validate_osm.compare.data import DescriptorData
 from validate_osm.compare.plot import DescriptorPlot
-from validate_osm.compare.validate import DescriptorValidate
+from validate_osm.compare.matrix import DescriptorMatrix
 from validate_osm.source.footprint import CallableFootprint
 from validate_osm.source.source import (
     Source, BBox
 )
-
+from validate_osm.compare.floc import FootprintIlocIndexer
+from validate_osm.compare.osm import DescriptorOSM
 
 class Compare:
     data = DescriptorData()
@@ -27,7 +28,19 @@ class Compare:
     plot = DescriptorPlot()
     batch: Union[GeoDataFrame]
     sources: dict[str, Source]
-    validate = DescriptorValidate()
+    matrix = DescriptorMatrix()
+    floc = FootprintIlocIndexer()
+    # osm = DescriptorOSM()
+
+    @staticmethod
+    def to_json(df: pd.DataFrame):
+        ...
+
+    @staticmethod
+    def to_csv(df: pd.DataFrame):
+        ...
+
+
 
     # TODO: How best can the user specify which files are to be redone?
     def __init__(
@@ -125,23 +138,34 @@ class Compare:
         return self.footprint.gdf
 
     @property
-    def index(self) -> int | str:
+    def identity(self) -> int | str:
         # TODO: Dynamically determine from Sources
         return 'ubid'
 
     def _get_index_values(self, gdf: Union[GeoDataFrame, GeoSeries]) -> Iterable[int | str]:
-        return gdf.index.get_level_values(level=self.index) if isinstance(gdf.index, pd.MultiIndex) else gdf.index
+        return gdf.index.get_level_values(level=self.identity) if isinstance(gdf.index, pd.MultiIndex) else gdf.index
 
     def xs(self, key: Union[int | str, pd.Series, pd.DataFrame]) -> GeoDataFrame:
-        if isinstance(key, pd.DataFrame):
+        # to handle redundancy
+        if isinstance(key, GeoDataFrame):
             return key
+        # to convert to gdf so columns may be assigned
         if isinstance(key, (pd.Series)):
             return GeoDataFrame(key)
+        # return footprint
         if 'footprint' == key or key == 'footprints':
             return self.footprints
+        # return aggregate of name
         if key in self.names:
-            return self.aggregate.xs(key, level='name', drop_level=False)
-        return self.aggregate.xs(key, level=self.index, drop_level=False)
+            return self.aggregate.xs(key, level='name', drop_level=True)
+        # return aggregate of footprint iloc
+        return self.aggregate.xs(key, level=self.identity, drop_level=True)
+
+    # def iloc(self, key: int) -> GeoDataFrame:
+    #     loc = self.footprints.iloc[key].index
+    #     idx = pd.IndexSlice
+    #     return self.aggregate.loc[idx[loc, :], :]
+
 
     @functools.cached_property
     def name(self) -> str:
@@ -312,7 +336,7 @@ class Compare:
         return pd.Series((
             g.intersection(in_[i]).area / area[i]
             for i, g in of.items()
-        ), index=pd.Index(of.keys(), name=self.index), dtype='float64')
+        ), index=pd.Index(of.keys(), name=self.identity), dtype='float64')
 
     def difference_percent(self, of, and_, value: int | str) -> pd.Series:
         of = self.xs(of)
@@ -338,7 +362,7 @@ class Compare:
                 else:
                     yield (b - a) / b
 
-        return pd.Series(gen(), index=pd.Index(and_.keys(), name=self.index), dtype='float64')
+        return pd.Series(gen(), index=pd.Index(and_.keys(), name=self.identity), dtype='float64')
 
     def difference_absolute(self, of, and_, value: int | str) -> pd.Series:
         of: GeoDataFrame = self.xs(of)
@@ -364,7 +388,7 @@ class Compare:
                 else:
                     yield b - a
 
-        return pd.Series(gen(), index=pd.Index(and_.keys(), name=self.index), dtype='float64')
+        return pd.Series(gen(), index=pd.Index(and_.keys(), name=self.identity), dtype='float64')
 
     def difference_scaled(self, of, and_, value: int | str) -> pd.Series:
         difference = self.difference_percent(of, and_, value)
@@ -391,7 +415,7 @@ class Compare:
         return GeoSeries((
             geom.intersection(of[i])
             for i, geom in and_.items()
-        ), index=pd.Index(and_.keys(), name=self.index), crs=crs, name='geometry')
+        ), index=pd.Index(and_.keys(), name=self.identity), crs=crs, name='geometry')
 
     def union(self, of, and_) -> GeoSeries:
         of = self.xs(of)
@@ -410,9 +434,10 @@ class Compare:
         return GeoSeries((
             geom.union(of[i])
             for i, geom in and_.items()
-        ), index=pd.Index(and_.keys(), name=self.index), crs=crs, name='geometry')
+        ), index=pd.Index(and_.keys(), name=self.identity), crs=crs, name='geometry')
 
     def quality(self, of, and_) -> pd.Series:
         union = self.union(of, and_)
         intersection = self.intersection(of, and_)
         return self.containment(of=intersection, in_=union)
+

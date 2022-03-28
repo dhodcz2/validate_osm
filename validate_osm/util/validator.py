@@ -48,7 +48,7 @@ class Validator:
         building_needles = building_needles.cx[bbox[0]:bbox[2], bbox[1]:bbox[3]]
         source_needles['building_group'] = pd.Series({
             i: building_index
-            for source_index, building_index in zip(building_needles['source_index'], building_needles.index)
+            for source_index, building_index in zip(building_needles['source_index'], building_needles.identity)
             for i in source_index
         })
         return plot_groupings(building_needles, source_needles, 'building_group', bbox, flip_ax=True)
@@ -63,7 +63,7 @@ class Validator:
         building_haystack = building_haystack.cx[bbox[0]:bbox[2], bbox[1]:bbox[3]]
         source_haystack['building_group'] = pd.Series({
             i: building_index
-            for source_index, building_index in zip(building_haystack['source_index'], building_haystack.index)
+            for source_index, building_index in zip(building_haystack['source_index'], building_haystack.identity)
             for i in source_index
         })
         # return plot_groupings(building_haystack, source_haystack, 'building_group', bbox, flip_ax=True)
@@ -112,7 +112,7 @@ class Validator:
             if hr > hl else
             (hl - hr) / hl
             for hl, hr in zip(matches['height_m'], matches['height_m_r'])
-        ), index=matches.index)
+        ), index=matches.identity)
 
         print(matches['percent_error'].median())
         from validate_osm.util.plot import plot_discrepancies
@@ -145,7 +145,7 @@ class Validator:
                 if vr > vl else
                 (vl - vr) / vl
                 for vl, vr in zip(match[validating], match[validating + '_h'])
-            ), index=match.loc[loc].index)
+            ), index=match.loc[loc].identity)
         return match
 
 

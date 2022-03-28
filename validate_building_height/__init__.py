@@ -10,6 +10,8 @@
 # ChicagoBuildingFootprints
 # )
 #
+import validate_building_height.compare
+
 from validate_building_height.compare import (
     Compare,
     CompareUIC,
@@ -17,3 +19,5 @@ from validate_building_height.compare import (
     CompareChicago,
     BBox,
 )
+a = 5
+print('imported')

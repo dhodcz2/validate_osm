@@ -15,7 +15,7 @@ import shapely.geometry.base
 import shapely.ops
 from geopandas import GeoSeries, GeoDataFrame
 
-from validate_osm.source.aggregate import AggregateFactory
+from validate_osm.source.aggregate import FactoryAggregate
 from validate_osm.source.data import DecoratorData, DescriptorData
 from validate_osm.source.footprint import CallableFootprint
 from validate_osm.source.resource import StaticBase
@@ -160,7 +160,7 @@ class Source(abc.ABC, metaclass=SourceMeta):
     data: Union[DescriptorData, GeoDataFrame] = DescriptorData()
     footprint: Type[CallableFootprint] = CallableFootprint
     # groups: Union[Groups, DescriptorGroup] = DescriptorGroup()
-    aggregate_factory: Type[AggregateFactory] = AggregateFactory
+    aggregate_factory: Type[FactoryAggregate] = FactoryAggregate
     name: str
     link: str
     bbox: BBox
@@ -235,9 +235,9 @@ class Source(abc.ABC, metaclass=SourceMeta):
     @DecoratorData(dtype='string', crs=None, dependent='centroid')
     def ref(self):
         return pd.Series((
-            f'{centroid.y:.4f}\n{centroid.x:.4f}'
+            f'{centroid.y:.4f}, {centroid.x:.4f}'
             if centroid is not None
-            else ''
+            else None
             for centroid in self.data['centroid'].to_crs(4326)
         ), index=self.data.index, dtype='string')
 
