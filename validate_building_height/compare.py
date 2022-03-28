@@ -39,12 +39,12 @@ CompareRio: Type[Compare] = partial(
 
 
 if __name__ == '__main__':
-    compare = CompareChicago()
+    compare = CompareChicago(redo=['osm'])
     from validate_osm.source.source import BBox
 
     bbox = BBox((41.87562863242608, -87.63515367506594, 41.88690149672215, -87.62048834003896), crs='epsg:4326')
     loop = compare[bbox]
-    loop.plot.difference_scaled('osm', 'cbf', value=['floors', 'height_m'])
+    # loop.plot.difference_scaled('osm', 'cbf', value=['floors', 'height_m'])
     # loop.matrix.percent_difference('osm', 'cbf', ['height_m', 'floors'])
     # loop.results('osm', 'cbf')
     # loop.floc[26]
@@ -55,4 +55,4 @@ validateosm (1 2 3 4) 'height_m' 'floors' output.csv output.json
 # push json to REST api 
 validateosm commit ./output.json
 validateosm --user dhodcz2 --password password  push 
-"""o
+"""

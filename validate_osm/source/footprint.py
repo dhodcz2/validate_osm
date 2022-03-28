@@ -104,7 +104,7 @@ class CallableFootprint:
         # Second, aggregate the geometries where there is an overlap.
         data['area'] = data.area
         data = data.sort_values(by='area', ascending=False)
-        footprints = pd.Series(range(len(data)), index=data.identity)
+        footprints = pd.Series(range(len(data)), index=data.index)
 
         annoy = AnnoyIndex(2, 'euclidean')
         for i, centroid in enumerate(data['centroid']):

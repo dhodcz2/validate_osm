@@ -107,7 +107,7 @@ class DescriptorData:
         # TODO: Investigate how these invalid geometries came to be
         inval = data['geometry'].isna() | data['centroid'].isna()
         if any(inval):
-            msg = ', '.join(str(tuple) for tuple in data[inval].identity)
+            msg = ', '.join(str(tuple) for tuple in data[inval].index)
             self._instance.logger.warning(f'invalid geometry: {msg}')
             data = data[~inval]
 
