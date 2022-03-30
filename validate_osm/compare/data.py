@@ -112,7 +112,7 @@ class DescriptorData:
             data = data[~inval]
 
         self.__set__(self._instance, data)
-        return data
+        return self.__get__(self._instance, 'data')
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         from validate_osm.compare.compare import Compare

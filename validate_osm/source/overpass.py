@@ -188,6 +188,11 @@ class DynamicOverpassResource(Resource):
     name = 'osm'
     link = 'https://www.openstreetmap.org'
 
+    boundary = True
+
+    def __contains__(self, item):
+        return True
+
     def __get__(self, instance: Source, owner: Type[Source]):
         self.source = instance
         self.owner = owner

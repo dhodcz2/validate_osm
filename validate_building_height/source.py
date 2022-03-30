@@ -1,4 +1,5 @@
 import datetime
+from shapely.geometry import box
 from typing import Iterable
 
 import numpy as np
@@ -7,10 +8,12 @@ import shapely
 
 from validate_building_height.building import Height, BuildingSourceOSM
 from validate_osm.source import *
+from validate_osm.source import BBox
 from validate_osm.source.resource import File
 
 
 class SourceMSBuildingFootprints(Height):
+
     from validate_building_height.regional import MSBuildingFootprints
     resource = MSBuildingFootprints()
 
@@ -57,6 +60,8 @@ class SourceMSBuildingFootprints(Height):
 #
 
 class HeightOSM(BuildingSourceOSM, Height):
+    bbox = True
+
     @enumerative(float)
     def floors(self):
         yield from (
@@ -73,6 +78,10 @@ class HeightOSM(BuildingSourceOSM, Height):
 
 
 class HeightChicagoBuildingFootprints(Height):
+    bbox = BBox((
+        41.20771257335822, -88.71312626050252, 42.6664014741069, -86.88939577195931
+    ), crs='epsg:4326')
+
     resource = StaticNaive(
         files=File(
             url='https://data.cityofchicago.org/api/geospatial/hz9b-7nh8?method=export&format=GeoJSON',
@@ -80,7 +89,8 @@ class HeightChicagoBuildingFootprints(Height):
         ),
         crs=4326,
         name='cbf',
-        link='https://data.cityofchicago.org/Buildings/Building-Footprints-current-/hz9b-7nh8'
+        link='https://data.cityofchicago.org/Buildings/Building-Footprints-current-/hz9b-7nh8',
+        boundary=box(41.23370459141704, -88.67875452074257, 42.60354605338037, -86.83312195248142)
     )
 
     def geometry(self) -> Iterable[shapely.geometry.base.BaseGeometry]:
@@ -154,4 +164,3 @@ class HeightChicagoBuildingFootprints(Height):
                             yield pd.NaT
 
         yield from gen()
-

@@ -1,118 +1,23 @@
 import abc
-import dataclasses
 import itertools
 import logging
 import warnings
-from typing import Any, Type
-from typing import Optional, Collection, Union
+from typing import Type
+from typing import Optional, Union
 
 import geopandas as gpd
 import numpy as np
 import numpy.typing
 import pandas as pd
-import pyproj
-import shapely.geometry.base
-import shapely.ops
-from geopandas import GeoSeries, GeoDataFrame
+from geopandas import GeoDataFrame
 
+from validate_osm.source.bbox import BBox
 from validate_osm.source.aggregate import FactoryAggregate
 from validate_osm.source.data import DecoratorData, DescriptorData
 from validate_osm.source.footprint import CallableFootprint
 from validate_osm.source.resource import StaticBase
 
 warnings.filterwarnings('ignore', message='.*initial implementation of Parquet.*')
-
-
-@dataclasses.dataclass
-class BBox:
-    ellipsoidal: Union[Collection[float], shapely.geometry.Polygon]
-    crs: Any = dataclasses.field(default='epsg:4326')
-    _ellipsoidal: shapely.geometry.Polygon = dataclasses.field(init=False, repr=False)
-    _cartesian: shapely.geometry.Polygon = dataclasses.field(init=False, repr=False)
-
-    @property
-    def ellipsoidal(self) -> shapely.geometry.Polygon:
-        return self._ellipsoidal
-
-    @ellipsoidal.setter
-    def ellipsoidal(self, value):
-        if isinstance(value, (tuple, list)):
-            e = value
-            minlat = min(e[0], e[2])
-            maxlat = max(e[0], e[2])
-            minlong = min(e[1], e[3])
-            maxlong = max(e[1], e[3])
-            self._ellipsoidal = shapely.geometry.Polygon((
-                (minlat, minlong), (maxlat, minlong), (maxlat, maxlong), (minlat, maxlong),
-            ))
-            self._cartesian = shapely.geometry.Polygon((
-                (minlong, minlat), (minlong, maxlat), (maxlong, maxlat), (maxlong, minlat)
-            ))
-        elif isinstance(value, shapely.geometry.Polygon):
-            self._ellipsoidal = value
-            self._cartesian = shapely.geometry.Polygon(((y, x) for (x, y) in value.exterior.coords))
-        else:
-            raise TypeError(value)
-
-        # if isinstance(value, (tuple, list)):
-        #     e = value
-        #     minx = min(e[0], e[2])
-        #     maxx = max(e[0], e[2])
-        #     miny = min(e[1], e[3])
-        #     maxy = max(e[1], e[3])
-        #     self._ellipsoidal = shapely.geometry.Polygon((
-        #         (minx, miny), (maxx, miny), (maxx, maxy), (minx, maxy),
-        #     ))
-        #     self._cartesian = shapely.geometry.Polygon((
-        #         (miny, minx), (maxy, minx), (maxy, maxx), (miny, maxx)
-        #     ))
-        # elif isinstance(value, shapely.geometry.Polygon):
-        #     self._ellipsoidal = value
-        #     self._cartesian = shapely.geometry.Polygon(((y, x) for (x, y) in value.exterior.coords))
-        # else:
-        #     raise TypeError(value)
-        #
-
-    @property
-    def cartesian(self) -> shapely.geometry.Polygon:
-        return self._cartesian
-
-    def __repr__(self):
-        elliposidal = ([
-            round(bound, 2)
-            for bound in self.ellipsoidal.bounds
-        ])
-        cartesian = ([
-            round(bound, 2)
-            for bound in self.cartesian.bounds
-        ])
-        crs = self.crs
-        return f"{self.__class__.__name__}[{elliposidal=} {cartesian=} {crs=}]"
-
-    def __str__(self):
-        return '_'.join(
-            str(round(bound, 5))
-            for bound in self.ellipsoidal.bounds
-        )
-
-    def to_crs(self, crs) -> 'BBox':
-        if self.crs == crs:
-            return self
-        trans = pyproj.Transformer.from_crs(self.crs, crs)
-        coords = [
-            trans.transform(y, x)
-            for (y, x)
-            in zip(*self.ellipsoidal.exterior.coords.xy)
-        ]
-        return BBox(shapely.geometry.Polygon(coords), crs=3857)
-        # return BBox(shapely.geometry.Polygon(
-        #     trans.transform(x, y)
-        #     # for (y, x) in self.ellipsoidal.exterior.coords.xy
-        # ))
-        # return BBox(shapely.geometry.Polygon(
-        #     trans.transform(x, y)
-        #     for (x, y) in self.ellipsoidal.exterior.coords.xy
-        # ), crs=crs)
 
 
 class SourceMeta(abc.ABCMeta, type):
@@ -142,8 +47,8 @@ class Source(abc.ABC, metaclass=SourceMeta):
         # handler.setFormatter(formatter)
         # self.logger.addHandler(handler)
 
-    # def __contains__(self, item) -> bool:
-    #     return item in self.__class__.resource
+    def __contains__(self, item: BBox) -> bool:
+        return item in self.__class__.resource
 
     # def __eq__(self, other):
     #     TODO: True if the sources have implemented all of the same data methods
@@ -163,7 +68,6 @@ class Source(abc.ABC, metaclass=SourceMeta):
     aggregate_factory: Type[FactoryAggregate] = FactoryAggregate
     name: str
     link: str
-    bbox: BBox
     resource: Union[StaticBase, pd.DataFrame, gpd.GeoDataFrame]
     ignore_file = False
 
@@ -240,7 +144,6 @@ class Source(abc.ABC, metaclass=SourceMeta):
             else None
             for centroid in self.data['centroid'].to_crs(4326)
         ), index=self.data.index, dtype='string')
-
 
         # loc = self.data['centroid'].notna()
         # return GeoSeries((

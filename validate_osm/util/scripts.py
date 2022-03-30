@@ -8,8 +8,6 @@ import pandas as pd
 from geopandas import GeoDataFrame, GeoSeries
 from pandas import DataFrame
 
-
-
 # def concat(gdfs: Iterable[GeoDataFrame]) -> GeoDataFrame:
 #     """Workaround because GeoDataFrame.concat returns DataFrame; we want to preserve CRS."""
 #     crs = {}
@@ -37,10 +35,11 @@ from pandas import DataFrame
 #     return result
 LoggedSubprocessAdapter: Union[IndentedLoggerAdapter, 'LoggedSubprocessAdapter']
 
-
 """
 INFO -  
 """
+
+
 @contextmanager
 def logged_subprocess(logger: IndentedLoggerAdapter, message: str, level=logging.INFO, timed=True):
     match level:

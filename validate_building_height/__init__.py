@@ -1,23 +1,18 @@
-# from validate_building_height.new_york import (
-# NewYorkBuildingHeightNeedles,
-# NewYorkLOD,
-# NewYork3DModel,
-# NewYorkOpenCityModel
-# )
-#
-# from validate_building_height.chicago import (
-# ChicagoBuildingHeightNeedles,
-# ChicagoBuildingFootprints
-# )
-#
-import validate_building_height.compare
-
-from validate_building_height.compare import (
-    Compare,
-    CompareUIC,
-    CompareRio,
-    CompareChicago,
-    BBox,
+from validate_building_height.source import (
+    HeightChicagoBuildingFootprints,
+    HeightOSM,
+    # SourceMSBuildingFootprints
 )
-a = 5
-print('imported')
+from validate_osm.source import BBox
+
+from validate_osm.compare import Compare
+from validate_building_height.compare import (
+    uic, rio, chicago, loop
+)
+
+__all__ = [
+    BBox.__name__,
+    HeightChicagoBuildingFootprints.__name__,
+    HeightOSM.__name__,
+    # SourceMSBuildingFootprints.__name__,
+]

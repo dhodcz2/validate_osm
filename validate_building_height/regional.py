@@ -1,3 +1,5 @@
+import shapely.ops
+from shapely.geometry import MultiPolygon, Polygon, box
 import functools
 import re
 import warnings
@@ -8,6 +10,7 @@ from typing import Union, Iterator
 import boto3
 import geopandas as gpd
 import pandas as pd
+import shapely.geometry
 from botocore import UNSIGNED
 from botocore.client import Config
 from botocore.handlers import disable_signing
@@ -22,6 +25,7 @@ class MSBuildingFootprints(StaticRegional):
     columns = 'geometry'
     name = 'msbf'
     link = ''
+    from shapely.geometry import MultiPolygon, Polygon, box
 
     class RegionSouthAmerica(StaticRegional.Region):
         menu = {'Argentina', 'Bolivia', 'Brazil', 'Chile', 'Colombia', 'Ecuador', 'Guyana', 'Paraguay',
@@ -33,6 +37,8 @@ class MSBuildingFootprints(StaticRegional):
                 raise TypeError(country)
             url = f'https://minedbuildings.blob.core.windows.net/southamerica/{country}.geojsonl.zip'
             yield File(url=url, path=MSBuildingFootprints.directory / url.rpartition('/')[2])
+
+        boundary = box(-58.88002722680884, -95.21236873547642, 14.140166857721917, -28.239719853462436)
 
     class RegionUS(StaticRegional.Region):
 
@@ -47,6 +53,13 @@ class MSBuildingFootprints(StaticRegional):
                        "Ohio", "Oklahoma", "Oregon", "Pennsylvania", "Rhode Island", "South Carolina",
                        "South Dakota", "Tennessee", "Texas", "Utah", "Virginia", "Vermont", "Washington",
                        "Wisconsin", "West Virginia", "Wyoming"}
+
+        boundary = shapely.geometry.MultiPolygon((
+            box(49.81802662705298, -170.5895835637255, 71.22315426188987, -123.97854598646403),
+            box(24.032930690989907, -131.0221779511748, 48.9826186052407, -56.32022172735033),
+            box(17.468979951964258, -67.98351198460144, 18.622298618964912, -65.14786359962861)
+
+        ))
 
         @functools.cached_property
         def _states(self) -> gpd.GeoDataFrame:
@@ -101,6 +114,8 @@ class MSBuildingFootprints(StaticRegional):
             url = 'https://usbuildingdata.blob.core.windows.net/australia-buildings/Australia_2020-06-21.geojson.zip'
             yield File(url=url, path=MSBuildingFootprints.directory / url.rpartition('/')[2])
 
+        boundary = box(-45.95836781644391, 112.14685348508199, -10.931540277420742, 155.00011297332182)
+
     class RegionUgandaTanzania(StaticRegional.Region):
         menu = {'Uganda', 'Tanzania'}
 
@@ -110,7 +125,10 @@ class MSBuildingFootprints(StaticRegional):
             url = f'https://usbuildingdata.blob.core.windows.net/tanzania-uganda-buildings/{country}_2019-09-16.zip'
             yield File(url=url, path=MSBuildingFootprints.directory / url.rpartition('/')[2])
 
+        boundary = box(-12.40097014498374, 28.447210924686175, 4.7015622291970995, 42.840213205976895)
+
     regions = (RegionUS(), RegionSouthAmerica(), RegionAustralia(), RegionUgandaTanzania())
+
 
     @functools.cached_property
     def _countries(self) -> gpd.GeoDataFrame:
@@ -135,6 +153,8 @@ class OpenCityData(StaticRegional):
     crs = 'epsg:4979'
     name = 'ocd'
     link = ''
+
+    boundary = False
 
     class RegionUS(StaticRegional.Region):
         menu = {"Alaska", "Alabama", "Arkansas", "Arizona", "California", "Colorado",

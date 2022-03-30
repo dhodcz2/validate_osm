@@ -1,8 +1,8 @@
-import functools
+from shapely.geometry import box
 import itertools
 import logging
 import os
-from typing import Generator, Collection
+from typing import Generator, Collection, Union, Iterable
 from typing import Hashable
 
 import geopandas as gpd
@@ -15,7 +15,9 @@ from geopandas import GeoDataFrame
 from networkx import connected_components
 from shapely.geometry.base import BaseGeometry
 
+from validate_osm.source.bbox import BBox
 from validate_osm.util.scripts import logged_subprocess
+
 
 # TODO: Perhaps the footprints can be accelerated with multiprocessing over the Summer
 #   where annoy.get is called for every entry and a a N x 30 matrix is created;
@@ -29,10 +31,41 @@ class CallableFootprint:
         self.path = compare.directory / 'footprint.feather'
         self._gdf = None
 
-    def __getitem__(self, item: shapely.geometry.Polygon) -> 'CallableFootprint':
+    # def __getitem__(self, item: shapely.geometry.Polygon) -> 'CallableFootprint':
+    #     footprints = CallableFootprint(self.compare)
+    #     gdf = self.gdf
+    #     footprints.gdf = gdf[gdf.geometry.intersects(item)]
+    #     return footprints
+
+    def __getitem__(
+            self,
+            item: Union[shapely.geometry.Polygon, int, str, Iterable[int], Iterable[str], gpd.GeoDataFrame]
+    ) -> 'CallableFootprint':
         footprints = CallableFootprint(self.compare)
         gdf = self.gdf
-        footprints.gdf = gdf[gdf.geometry.intersects(item)]
+        if isinstance(item, BBox):
+            projected = item.to_crs(self.gdf.crs)
+            footprints.gdf = gdf[gdf.geometry.intersects(projected.ellipsoidal)]
+        elif isinstance(item, shapely.geometry.Polygon):
+            footprints.gdf = gdf[gdf.geometry.intersects(item)]
+        elif isinstance(item, str):
+            footprints.gdf = gdf.loc[[item]]
+        elif isinstance(item, int):
+            footprints.gdf = gdf.iloc[[item]]
+        elif isinstance(item, GeoDataFrame):
+            polygon = box(*item.to_crs(self.gdf.crs).total_bounds)
+            footprints.gdf = gdf[gdf.geometry.intersects(polygon)]
+        elif isinstance(item, Iterable):
+            it = iter(item)
+            first = next(it)
+            if isinstance(item, int):
+                footprints.gdf = gdf.iloc[[first, *it]]
+            elif isinstance(item, str):
+                footprints.gdf = gdf.loc[[first, *it]]
+            else:
+                raise TypeError(first)
+        else:
+            raise TypeError(item)
         return footprints
 
     @property

@@ -1,3 +1,4 @@
+import shapely.ops
 import abc
 import concurrent.futures
 import dataclasses
@@ -17,7 +18,7 @@ import shapely.geometry
 from geopandas import GeoDataFrame
 from shapely.geometry import Polygon
 
-from validate_osm.args import global_args as project_args
+from validate_osm.source.bbox import BBox
 from validate_osm.util.scripts import concat, logged_subprocess
 
 
@@ -66,18 +67,13 @@ def get(session: requests.Session, file: File) -> None:
 class Resource(abc.ABC):
     name: str
     link: str
-
-    def __contains__(self, item) -> bool:
-        # TODO: return whether the resource contains data that is relevant to the BBox
-        ...
-
-
+    bbox: BBox
+    boundary: BBox
 
 
 class StaticBase(Resource):
     crs: Any
     flipped: bool = False
-    project_args = project_args
     preprocess: bool = True
 
     def crs(self) -> Any:
@@ -232,6 +228,7 @@ class StaticNaive(StaticBase):
             crs: Any,
             name: str,
             link: str,
+            boundary: BBox,
             flipped=False,
             unzipped=None,
             preprocess: bool = True,
@@ -250,9 +247,10 @@ class StaticNaive(StaticBase):
         self.unzipped = unzipped
         self.columns = columns
         self._cache = None
-        self.ztpreprocess = preprocess
+        self.preprocess = preprocess
         self.name = name
         self.link = link
+        self.boundary = boundary
 
     def __get__(self, instance, owner):
         from validate_osm.source import Source
@@ -274,6 +272,7 @@ class StaticNaive(StaticBase):
 class StaticRegional(StaticBase, abc.ABC):
     class Region(abc.ABC):
         menu: set[str]
+        boundary: shapely.geometry.base.BaseGeometry
 
         def __contains__(self, item: str):
             return item in self.menu
@@ -285,10 +284,19 @@ class StaticRegional(StaticBase, abc.ABC):
         def __getitem__(self, *items) -> Generator[File, None, None]:
             ...
 
+    @classmethod
+    @property
+    def boundary(cls) -> shapely.geometry.MultiPolygon:
+        return shapely.ops.unary_union([
+            region.boundary
+            for region in cls.regions
+        ])
+
     @abc.abstractmethod
     def _files_from_polygon(self, item: Polygon) -> Generator[File, None, None]:
         ...
 
+    @classmethod
     @property
     @abc.abstractmethod
     def regions(self) -> Iterable['StaticRegional.Region']:
@@ -347,18 +355,19 @@ class StaticRegional(StaticBase, abc.ABC):
     def __delete__(self, instance):
         del self.cache[instance]
 
-    def __contains__(self, item: Union[str, Polygon]):
-        match item:
-            case str():
-                return item in self.menu
-            case Polygon():
-                try:
-                    next(iter(self._files_from_polygon(item)))
-                    return True
-                except StopIteration:
-                    return False
-            case _:
-                raise TypeError(item)
+    # def __contains__(self, item: Union[str, Polygon]):
+    #     match item:
+    #         case str():
+    #             return item in self.menu
+    #         case Polygon():
+    #             try:
+    #                 next(iter(self._files_from_polygon(item)))
+    #                 return True
+    #             except StopIteration:
+    #                 return False
+    #         case _:
+    #             raise TypeError(item)
+    #
 
     def from_files(cls) -> GeoDataFrame:
         raise NotImplementedError

@@ -1,10 +1,10 @@
 import functools
 import inspect
 import logging
+import warnings
 from pathlib import Path
 from typing import Union, Iterable, Type, Iterator, Optional
 
-import numpy as np
 import pandas as pd
 import shapely.geometry.base
 from geopandas import GeoDataFrame
@@ -13,14 +13,15 @@ from python_log_indenter import IndentedLoggerAdapter
 
 from validate_osm.compare.aggregate import DescriptorAggregate
 from validate_osm.compare.data import DescriptorData
-from validate_osm.compare.plot import DescriptorPlot
+from validate_osm.compare.floc import FootprintIlocIndexer
 from validate_osm.compare.matrix import DescriptorMatrix
+from validate_osm.compare.plot import DescriptorPlot
+from validate_osm.source import BBox
 from validate_osm.source.footprint import CallableFootprint
 from validate_osm.source.source import (
-    Source, BBox
+    Source
 )
-from validate_osm.compare.floc import FootprintIlocIndexer
-from validate_osm.compare.osm import DescriptorOSM
+
 
 class Compare:
     data = DescriptorData()
@@ -30,6 +31,7 @@ class Compare:
     sources: dict[str, Source]
     matrix = DescriptorMatrix()
     floc = FootprintIlocIndexer()
+
     # osm = DescriptorOSM()
 
     @staticmethod
@@ -39,8 +41,6 @@ class Compare:
     @staticmethod
     def to_csv(df: pd.DataFrame):
         ...
-
-
 
     # TODO: How best can the user specify which files are to be redone?
     def __init__(
@@ -133,6 +133,10 @@ class Compare:
         self._footprint = footprint = footprint(self)
         return footprint
 
+    @footprint.setter
+    def footprint(self, value):
+        self._footprint = value
+
     @property
     def footprints(self) -> GeoDataFrame:
         return self.footprint.gdf
@@ -166,7 +170,6 @@ class Compare:
     #     idx = pd.IndexSlice
     #     return self.aggregate.loc[idx[loc, :], :]
 
-
     @functools.cached_property
     def name(self) -> str:
         names = list(self.sources.keys())
@@ -178,70 +181,82 @@ class Compare:
         return set(self.sources.keys())
 
     def __repr__(self):
-        return f'{self.__class__.__name__}[{self.name}]'
+        return f'{self.__class__.__name__}(bbox={repr(self.bbox)}, names={self.names})'
+        # return f'{self.__class__.__name__}[{self.name}]'
 
-    def __getitem__(self, items) -> 'Compare':
-        if not isinstance(items, tuple):
-            items = (items,)
-        data = self.data
-        agg = self.aggregate
+    #
+    # def __getitem__(self, items) -> 'Compare':
+    #     if not isinstance(items, tuple):
+    #         items = (items,)
+    #     data = self.data
+    #     agg = self.aggregate
+    #
+    #     # # [[94.1, -70, 94.8, -72]] or [BBox(94.1, -70, 94.8, -72)]
+    #     try:
+    #         bbox = next(
+    #             item for item in items
+    #             if isinstance(item, (list, BBox))
+    #         )
+    #     except StopIteration:
+    #         bbox = self.bbox
+    #         footprint = self.footprint
+    #     else:
+    #         if isinstance(bbox, list):
+    #             # Flipped because it's typically constructed with ellipsoidal
+    #             projected = BBox(bbox, crs='3857')
+    #             polygon = projected.ellipsoidal
+    #         elif isinstance(bbox, BBox):
+    #             projected = bbox.to_crs(3857)
+    #             # TODO: Why is it ellipsoidal and not cartesian? Something doesn't seem right.
+    #             polygon = projected.ellipsoidal
+    #             # The issue of flipped coords with ellipsoidal/cartesian is very annoying
+    #
+    #         footprint = self.footprint[polygon]
+    #         identifiers = set(footprint.gdf.index.get_level_values('ubid'))
+    #         data = data[data.index.get_level_values('ubid').isin(identifiers)]
+    #         agg = agg[agg.index.get_level_values('ubid').isin(identifiers)]
+    #
+    #     # ['osm', 'msbf']
+    #     names = {
+    #         item for item in items
+    #         if isinstance(item, str)
+    #     }
+    #     if names:
+    #         data = data[data.index.get_level_values('name').isin(names)]
+    #         agg = data[data.index.get_level_values('name').isin(names)]
+    #         sources = {
+    #             name: source
+    #             for name, source in self.sources.items()
+    #             if name in names
+    #         }
+    #     else:
+    #         sources = self.sources
+    #
+    #     data['iloc'] = pd.Series(range(len(data)), dtype='int32')
+    #     agg['iloc'] = pd.Series(range(len(agg)), dtype='int32')
+    #
+    #     compare = Compare(
+    #         bbox,
+    #         redo=None,
+    #         debug=False,
+    #         verbose=False,
+    #         serialize=False
+    #     )
+    #     compare.data = data
+    #     compare._footprint = footprint
+    #     compare.aggregate = agg
+    #     # Perhaps create a new Source instance that encapsulates a smaller .data
+    #     compare.sources = sources
+    #     return compare
 
-        # # [[94.1, -70, 94.8, -72]] or [BBox(94.1, -70, 94.8, -72)]
-        try:
-            bbox = next(
-                item for item in items
-                if isinstance(item, (list, BBox))
-            )
-        except StopIteration:
-            bbox = self.bbox
-            footprint = self.footprint
-        else:
-            if isinstance(bbox, list):
-                # Flipped because it's typically constructed with ellipsoidal
-                projected = BBox(bbox, crs='3857')
-                polygon = projected.ellipsoidal
-            elif isinstance(bbox, BBox):
-                projected = bbox.to_crs(3857)
-                # TODO: Why is it ellipsoidal and not cartesian? Something doesn't seem right.
-                polygon = projected.ellipsoidal
-                # The issue of flipped coords with ellipsoidal/cartesian is very annoying
-
-            footprint = self.footprint[polygon]
-            identifiers = set(footprint.gdf.index.get_level_values('ubid'))
-            data = data[data.index.get_level_values('ubid').isin(identifiers)]
-            agg = agg[agg.index.get_level_values('ubid').isin(identifiers)]
-
-        # ['osm', 'msbf']
-        names = {
-            item for item in items
-            if isinstance(item, str)
-        }
-        if names:
-            data = data[data.index.get_level_values('name').isin(names)]
-            agg = data[data.index.get_level_values('name').isin(names)]
-            sources = {
-                name: source
-                for name, source in self.sources.items()
-                if name in names
-            }
-        else:
-            sources = self.sources
-
-        data['iloc'] = pd.Series(range(len(data)), dtype='int32')
-        agg['iloc'] = pd.Series(range(len(agg)), dtype='int32')
-
-        compare = Compare(
-            bbox,
-            redo=None,
-            debug=False,
-            verbose=False,
-            serialize=False
-        )
-        compare.data = data
-        compare._footprint = footprint
-        compare.aggregate = agg
-        # Perhaps create a new Source instance that encapsulates a smaller .data
-        compare.sources = sources
+    def __getitem__(self, item) -> 'Compare':
+        footprint = self.footprint[item]
+        identifiers = set(footprint.gdf.index.get_level_values(self.identity))
+        compare = Compare(bbox=None, redo=False, debug=False, verbose=False, serialize=False)
+        compare.sources = self.sources
+        compare.footprint = footprint
+        compare.data = self.data[self.data.index.get_level_values(self.identity).isin(identifiers)]
+        compare.agg = self.aggregate[self.aggregate.index.get_level_values(self.identity).isin(identifiers)]
         return compare
 
     @functools.cached_property
@@ -397,7 +412,6 @@ class Compare:
         result = result[result.notna()]
         return result
 
-
     def intersection(self, of, and_) -> GeoSeries:
         of: GeoDataFrame = self.xs(of)
         and_: GeoDataFrame = self.xs(and_)
@@ -440,4 +454,3 @@ class Compare:
         union = self.union(of, and_)
         intersection = self.intersection(of, and_)
         return self.containment(of=intersection, in_=union)
-
