@@ -1,3 +1,5 @@
+import warnings
+warnings.filterwarnings('ignore', '.*Shapely GEOS.*', )
 from validate_building_height.source import (
     HeightChicagoBuildingFootprints,
     HeightOSM,

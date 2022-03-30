@@ -149,7 +149,7 @@ class Compare:
     def _get_index_values(self, gdf: Union[GeoDataFrame, GeoSeries]) -> Iterable[int | str]:
         return gdf.index.get_level_values(level=self.identity) if isinstance(gdf.index, pd.MultiIndex) else gdf.index
 
-    def xs(self, key: Union[int | str, pd.Series, pd.DataFrame]) -> GeoDataFrame:
+    def xs(self, key: Union[int | str, pd.Series, pd.DataFrame], stage: str = 'aggregate') -> GeoDataFrame:
         # to handle redundancy
         if isinstance(key, GeoDataFrame):
             return key
@@ -159,11 +159,23 @@ class Compare:
         # return footprint
         if 'footprint' == key or key == 'footprints':
             return self.footprints
+        if isinstance(key, int):
+            key = self.footprints.iloc[key].name
         # return aggregate of name
         if key in self.names:
-            return self.aggregate.xs(key, level='name', drop_level=True)
+            if stage == 'aggregate':
+                return self.aggregate.xs(key, level='name', drop_level=False)
+            elif stage == 'data':
+                return self.data.xs(key, level='name', drop_level=False)
+            else:
+                raise ValueError(stage)
         # return aggregate of footprint iloc
-        return self.aggregate.xs(key, level=self.identity, drop_level=True)
+        if stage == 'aggregate':
+            return self.aggregate.xs(key, level=self.identity, drop_level=False)
+        elif stage == 'data':
+            return self.data.xs(key, level=self.identity, drop_level=False)
+        else:
+            raise ValueError(stage)
 
     # def iloc(self, key: int) -> GeoDataFrame:
     #     loc = self.footprints.iloc[key].index

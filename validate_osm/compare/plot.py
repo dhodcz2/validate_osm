@@ -8,7 +8,11 @@ from typing import Hashable, Optional, Iterable, Union, Iterator, Any, Callable
 
 import pandas as pd
 
-COLORS = list(mcolors.TABLEAU_COLORS.values())
+# COLORS = list(mcolors.TABLEAU_COLORS.values())
+colors = mcolors.TABLEAU_COLORS
+if 'tab:gray' in colors:
+    del colors['tab:gray']
+COLORS = list(colors.values())
 HATCHES = '\\ - | /'.split()
 
 import geopandas as gpd
@@ -19,15 +23,20 @@ def _pseudo_colormap(groups: Iterable[pd.Index], gdf: gpd.GeoDataFrame) -> gpd.G
     # Assign a color and hatch to every unique UBID
     lenc = len(COLORS)
     lenh = len(HATCHES)
+    # TODO: If no match, gray
     # index = pd.MultiIndex(itertools.chain.from_iterable(groups), names=gdf.index.names)
     index = pd.MultiIndex.from_tuples(itertools.chain.from_iterable(groups), names=gdf.index.names)
     color = pd.Series((
         COLORS[i % lenc]
+        if len(group) > 1
+        else 'gray'
         for i, group in enumerate(groups)
         for _ in group
     ), index=index)
     hatch = pd.Series((
         HATCHES[i % lenh]
+        if len(group) > 1
+        else ''
         for i, group in enumerate(groups)
         for _ in group
     ), index=index)
@@ -43,8 +52,8 @@ def _suptitle(compare, fig, funcname, l: dict):
 
 
 def _annotate(ax, params, gdf):
-    if (annotation := params['annotation']):
-        for centroid, v in zip(gdf['centroid'].to_crs(params['crs']), gdf[annotation]):
+    if params['annotation']:
+        for centroid, v in zip(gdf['centroid'].to_crs(params['crs']), gdf['iloc']):
             if isinstance(v, float):
                 v = '%.1f' % v
             else:
@@ -95,7 +104,8 @@ class DescriptorPlot:
             self._params = {
                 'crs': 3857,
                 'annotation': 'iloc',
-
+                'intersection': False,
+                'suptitle': False,
             }
         return self._params
 
@@ -106,19 +116,10 @@ class DescriptorPlot:
         self._instance: Compare
         agg = self._instance.aggregate
 
-        # if ubid is None:
-        #     pass
-        # elif isinstance(ubid, Hashable):
-        #     agg = agg.xs(ubid, level='ubid')
-        # elif isinstance(ubid, Iterable):
-        #     agg = agg[agg.index.isin(set(ubid))]
-        # else:
-        #     raise TypeError(ubid)
-
         names = list(agg.index.get_level_values('name').unique())
-        fig, axes = plt.subplots(1, len(names))
-        print(local)
-        _suptitle(self._instance, fig, self.matches.__name__, local)
+        # fig, axes = plt.subplots(1, len(names))
+        fig, axes = plt.subplots(len(names), 1)
+        # _suptitle(self._instance, fig, self.matches.__name__, local)
 
         agg: gpd.GeoDataFrame
         groups: Iterable[pd.Index] = agg.groupby('ubid').groups.values()
@@ -198,8 +199,8 @@ class DescriptorPlot:
 
         (params := self.params.copy()).update(kwargs)
         fig, ax = plt.subplots(1, 1)
-        _suptitle(self._instance, fig, self._instance.plot.quality.__name__, locale)
-        ax.set_title(f'intersection area of {of} and {and_}')
+        # _suptitle(self._instance, fig, self._instance.plot.quality.__name__, locale)
+        ax.set_title(f'intersection area / union area of {of} and {and_}')
 
         from validate_osm.compare.compare import Compare
         compare: Compare = self._instance
@@ -226,7 +227,8 @@ class DescriptorPlot:
         from validate_osm.compare import Compare
         compare: Compare = self._instance
         fig, ax = plt.subplots(1, 1)
-        _suptitle(compare, fig, compare.plot.difference_percent.__name__, locale)
+        if params['suptitle']:
+            _suptitle(compare, fig, compare.plot.difference_percent.__name__, locale)
 
         if not isinstance(of, str) or not isinstance(and_, str):
             raise TypeError
@@ -234,68 +236,57 @@ class DescriptorPlot:
         difference = compare.matrix.percent_difference(rows=of, columns=and_, values=values)
         difference = difference.reset_index('name', drop=True)[and_]
         # difference = difference.reset_index(compar, level='name', drop=True)[and_]
-        union = compare.union(of, and_).loc[difference.index]
-        intersection = compare.intersection(of, and_).loc[difference.index]
-        iloc = compare.footprints.loc[difference.index, 'iloc']
 
-        gdf = GeoDataFrame({
-            'geometry': intersection,
-            'difference': difference,
-            'centroid': intersection.centroid,
-            'iloc': iloc
-        })
+        if params['intersection']:
+            union = compare.union(of, and_).loc[difference.index]
+            intersection = compare.intersection(of, and_).loc[difference.index]
+            iloc = compare.footprints.loc[difference.index, 'iloc']
 
-        gdf.plot(cmap='RdYlGn_r', column='difference', ax=ax, legend=True)
-        union.boundary.plot(ax=ax)
+            gdf = GeoDataFrame({
+                'geometry': intersection,
+                'difference': difference,
+                'centroid': intersection.centroid,
+                'iloc': iloc
+            })
+            gdf.plot(cmap='RdYlGn_r', column='difference', ax=ax, legend=True)
+            union.boundary.plot(ax=ax)
+        else:
+            gdf = compare.footprints.loc[difference.index].assign(difference=difference)
+            gdf.plot(cmap='RdYlGn_r', column='difference', ax=ax, legend=True)
         _annotate(ax, params, gdf)
 
-        # difference = compare.difference_percent(of, and_, value)
-        # union = compare.union(of, and_).loc[difference.index]
-        # intersection = compare.intersection(of, and_).loc[difference.index]
-        #
-        # gdf = GeoDataFrame({
-        #     'geometry': intersection,
-        #     'difference': difference,
-        #     'centroid': intersection.centroid
-        # })
-        # gdf['iloc'] = compare.footprints['iloc']
-        #
-        # gdf.plot(cmap='RdYlGn_r', column='difference', ax=ax, legend=True)
-        # union.boundary.plot(ax=ax)
-        # _annotate(ax, params, gdf)
-        #
-
-    def difference_scaled(self, of, and_, value, **kwargs):
-        locale = locals()
-        (params := self.params.copy()).update(kwargs)
-        from validate_osm.compare import Compare
-        compare: Compare = self._instance
-        fig, ax = plt.subplots(1, 1)
-        _suptitle(compare, fig, compare.plot.difference_scaled.__name__, locale)
-
-        difference = compare.difference_scaled(of, and_, value)
-        union = compare.union(of, and_).loc[difference.index]
-        intersection = compare.intersection(of, and_).loc[difference.index]
-
-        gdf = GeoDataFrame({
-            'geometry': intersection,
-            'difference': difference,
-            'centroid': intersection.centroid
-        })
-        gdf['iloc'] = compare.footprints['iloc']
-
-        gdf.plot(cmap='RdYlGn_r', column='difference', ax=ax, legend=True)
-        union.boundary.plot(ax=ax),
-        _annotate(ax, params, gdf)
-
-        # difference = compare.difference_scaled(of, and_, value)
-        # footprints: GeoDataFrame = compare.footprints.loc[difference.index].assign(
-        #     difference=difference
-        # )
-        #
-        # footprints.to_crs(params['crs']).plot(cmap='RdYlGn_r', column='difference', ax=ax, legend=True)
-        # _annotate(ax, params, footprints)
-        #
+    # def difference_scaled(self, of, and_, value, **kwargs):
+    #     locale = locals()
+    #     (params := self.params.copy()).update(kwargs)
+    #     from validate_osm.compare import Compare
+    #     compare: Compare = self._instance
+    #     fig, ax = plt.subplots(1, 1)
+    #     _suptitle(compare, fig, compare.plot.difference_scaled.__name__, locale)
+    #
+    #     difference = compare.difference_scaled(of, and_, value)
+    #     union = compare.union(of, and_).loc[difference.index]
+    #     intersection = compare.intersection(of, and_).loc[difference.index]
+    #
+    #     gdf = GeoDataFrame({
+    #         'geometry': intersection,
+    #         'difference': difference,
+    #         'centroid': intersection.centroid
+    #     })
+    #     gdf['iloc'] = compare.footprints['iloc']
+    #
+    #     gdf.plot(cmap='RdYlGn_r', column='difference', ax=ax, legend=True)
+    #     union.boundary.plot(ax=ax),
+    #     _annotate(ax, params, gdf)
+    #
+    #     # difference = compare.difference_scaled(of, and_, value)
+    #     # footprints: GeoDataFrame = compare.footprints.loc[difference.index].assign(
+    #     #     difference=difference
+    #     # )
+    #     #
+    #     # footprints.to_crs(params['crs']).plot(cmap='RdYlGn_r', column='difference', ax=ax, legend=True)
+    #     # _annotate(ax, params, footprints)
+    #     #
+    #
 
     def matched(self, name: Hashable, others: Optional[Hashable] = None, annotation: Optional[str] = 'iloc'):
         local = locals()
