@@ -1,22 +1,21 @@
-import math
-
-from geopandas import GeoDataFrame
 import itertools
+import math
+from typing import Hashable, Optional, Iterable, Union, Iterator, Any, Callable, Type
 
+import geopandas as gpd
 import matplotlib.colors as mcolors
-from typing import Hashable, Optional, Iterable, Union, Iterator, Any, Callable
-
+import matplotlib.pyplot as plt
 import pandas as pd
+from geopandas import GeoDataFrame
 
-# COLORS = list(mcolors.TABLEAU_COLORS.values())
+if False:
+    from validate_osm import Compare
+
 colors = mcolors.TABLEAU_COLORS
 if 'tab:gray' in colors:
     del colors['tab:gray']
 COLORS = list(colors.values())
 HATCHES = '\\ - | /'.split()
-
-import geopandas as gpd
-import matplotlib.pyplot as plt
 
 
 def _pseudo_colormap(groups: Iterable[pd.Index], gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
@@ -65,14 +64,14 @@ class DescriptorPlot:
     def __init__(self):
         self.style = 'dark_background'
 
-    def __get__(self, instance, owner):
-        self._instance = instance
+    def __get__(self, instance: 'Compare', owner: Type['Compare']):
+        self._compare = instance
         self._owner = owner
         return self
 
     @property
     def xs(self) -> Callable[[Hashable], GeoDataFrame]:
-        return self._instance.xs
+        return self._compare.xs
 
     @property
     def figsize(self):
@@ -112,17 +111,14 @@ class DescriptorPlot:
     def matches(self, **kwargs):
         local = locals().copy()
         (params := self.params.copy()).update(kwargs)
-        from validate_osm.compare.compare import Compare
-        self._instance: Compare
-        agg = self._instance.aggregate
+        agg = self._compare.aggregate
 
         names = list(agg.index.get_level_values('name').unique())
         # fig, axes = plt.subplots(1, len(names))
         fig, axes = plt.subplots(len(names), 1)
         # _suptitle(self._instance, fig, self.matches.__name__, local)
 
-        agg: gpd.GeoDataFrame
-        groups: Iterable[pd.Index] = agg.groupby('ubid').groups.values()
+        groups: Iterable[pd.Index] = agg.groupby('ubid')._groups.values()
         agg = _pseudo_colormap(groups, agg)
 
         # Each name corresponds to an axis; for each unique UBID with that name, plot with the color and hatch
@@ -142,16 +138,13 @@ class DescriptorPlot:
         locale = locals()
         (params := self.params.copy()).update(kwargs)
         fig, ax = plt.subplots(1, 1)
-        _suptitle(self._instance, fig, self.containment.__name__, locale)
+        _suptitle(self._compare, fig, self.containment.__name__, locale)
         ax.set_title(f'{of}.aggregate (unmatched grey); {within}.aggregate boundary;')
-
-        from validate_osm.compare.compare import Compare
-        compare: Compare = self._instance
 
         of = self.xs(of)
         within = self.xs(within)
         within = within[within.index.isin(set(of.index))]
-        overlap = compare.containment(of, within)
+        overlap = self._compare.containment(of, within)
         of = of.assign(overlap=overlap)
 
         of[of['overlap'].notna()].plot(cmap='RdYlGn', column='overlap', ax=ax, legend=True)
@@ -172,21 +165,18 @@ class DescriptorPlot:
         locale = locals()
         (params := self.params.copy()).update(kwargs)
         fig, ax = plt.subplots(1, 1)
-        _suptitle(self._instance, fig, self.completion.__name__, locale)
+        _suptitle(self._compare, fig, self.completion.__name__, locale)
         ax.set_title(f'completion of {of}.aggregate within footprints')
 
-        from validate_osm.compare.compare import Compare
-        compare: Compare = self._instance
-
         of = self.xs(of)
-        of = of.assign(completion=compare.completion(of))
+        of = of.assign(completion=self._compare.completion(of))
 
         # of.plot(cmap='RdYlGn', column='completion', ax=ax, legend=True)
 
         of.to_crs(params['crs']).plot(cmap='RdYlGn', column='completion', ax=ax, legend=True)
         # of.geometry.to_crs(params['crs']).plot(cmap='RdYlGn', column='completion', ax=ax, legend=True)
 
-        footprints = compare.footprints
+        footprints = self._compare.footprints
         footprints = footprints[footprints.index.isin(set(of.index.get_level_values('ubid')))]
         footprints.geometry.to_crs(params['crs']).boundary.plot(ax=ax)
 
@@ -194,20 +184,15 @@ class DescriptorPlot:
 
     def quality(self, of, and_, **kwargs):
         locale = locals()
-        from validate_osm.compare.compare import Compare
-        compare: Compare = self._instance
 
         (params := self.params.copy()).update(kwargs)
         fig, ax = plt.subplots(1, 1)
         # _suptitle(self._instance, fig, self._instance.plot.quality.__name__, locale)
         ax.set_title(f'intersection area / union area of {of} and {and_}')
 
-        from validate_osm.compare.compare import Compare
-        compare: Compare = self._instance
-
-        union = compare.union(of, and_)
-        intersection = compare.intersection(of, and_)
-        quality = compare.containment(of=union, in_=intersection)
+        union = self._compare.union(of, and_)
+        intersection = self._compare.intersection(of, and_)
+        quality = self._compare.containment(of=union, in_=intersection)
 
         gdf = GeoDataFrame({
             'geometry': intersection,
@@ -215,7 +200,7 @@ class DescriptorPlot:
             'centroid': intersection.centroid,
             # 'iloc': compare.footprints['iloc']
         })
-        gdf['iloc'] = compare.footprints['iloc']
+        gdf['iloc'] = self._compare.footprints['iloc']
 
         gdf.plot(cmap='RdYlGn', column='quality', ax=ax, legend=True)
         union.boundary.plot(ax=ax)
@@ -224,23 +209,21 @@ class DescriptorPlot:
     def difference_percent(self, of, and_, values, **kwargs):
         locale = locals()
         (params := self.params.copy()).update(kwargs)
-        from validate_osm.compare import Compare
-        compare: Compare = self._instance
         fig, ax = plt.subplots(1, 1)
         if params['suptitle']:
-            _suptitle(compare, fig, compare.plot.difference_percent.__name__, locale)
+            _suptitle(self._compare, fig, self._compare.plot.difference_percent.__name__, locale)
 
         if not isinstance(of, str) or not isinstance(and_, str):
             raise TypeError
 
-        difference = compare.matrix.percent_difference(rows=of, columns=and_, values=values)
+        difference = self._compare.matrix.percent_difference(rows=of, columns=and_, values=values)
         difference = difference.reset_index('name', drop=True)[and_]
         # difference = difference.reset_index(compar, level='name', drop=True)[and_]
 
         if params['intersection']:
-            union = compare.union(of, and_).loc[difference.index]
-            intersection = compare.intersection(of, and_).loc[difference.index]
-            iloc = compare.footprints.loc[difference.index, 'iloc']
+            union = self._compare.union(of, and_).loc[difference.index]
+            intersection = self._compare.intersection(of, and_).loc[difference.index]
+            iloc = self._compare.footprints.loc[difference.index, 'iloc']
 
             gdf = GeoDataFrame({
                 'geometry': intersection,
@@ -251,15 +234,15 @@ class DescriptorPlot:
             gdf.plot(cmap='RdYlGn_r', column='difference', ax=ax, legend=True)
             union.boundary.plot(ax=ax)
         else:
-            gdf = compare.footprints.loc[difference.index].assign(difference=difference)
+            gdf = self._compare.footprints.loc[difference.index].assign(difference=difference)
             gdf.plot(cmap='RdYlGn_r', column='difference', ax=ax, legend=True)
         _annotate(ax, params, gdf)
 
     # def difference_scaled(self, of, and_, value, **kwargs):
     #     locale = locals()
     #     (params := self.params.copy()).update(kwargs)
-    #     from validate_osm.compare import Compare
-    #     compare: Compare = self._instance
+    #     from validate_osm.compare import 'Compare'
+    #     compare: 'Compare' = self._instance
     #     fig, ax = plt.subplots(1, 1)
     #     _suptitle(compare, fig, compare.plot.difference_scaled.__name__, locale)
     #
@@ -291,11 +274,9 @@ class DescriptorPlot:
     def matched(self, name: Hashable, others: Optional[Hashable] = None, annotation: Optional[str] = 'iloc'):
         local = locals()
         fig, ax = plt.subplots(1, 1)
-        _suptitle(self._instance, fig, self.matched.__name__, local)
+        _suptitle(self._compare, fig, self.matched.__name__, local)
         ax.set_title(f'{name}.agg ')
-        from validate_osm.compare.compare import Compare
-        self._instance: Compare
-        gdf = self._instance.percent_overlap_of_aggregate(name, others)
+        gdf = self._compare.percent_overlap_of_aggregate(name, others)
         gdf.plot(cmap='RdYlGn', column='intersection', ax=ax)
 
         if annotation:
@@ -311,11 +292,9 @@ class DescriptorPlot:
         :return:
         """
         fig, (axd, axa) = plt.subplots(1, 2)
-        _suptitle(self._instance, fig, self.how.__name__, locals())
-        from validate_osm.compare.compare import Compare
-        self._instance: Compare
-        agg = self._instance.aggregate.xs(name, level='name', drop_level=False)
-        data = self._instance.data.xs(name, level='name', drop_level=False)
+        _suptitle(self._compare, fig, self.how.__name__, locals())
+        agg = self._compare.aggregate.xs(name, level='name', drop_level=False)
+        data = self._compare.data.xs(name, level='name', drop_level=False)
         if ubid is None:
             pass
         elif isinstance(ubid, Hashable):
@@ -352,20 +331,17 @@ class DescriptorPlot:
     def where(self, column: str, names: Union[str, Iterable[str]] = None, annotation: Optional[str] = 'iloc'):
         # TODO: if no comparison, color is gray
         local = locals()
-
-        from validate_osm.compare.compare import Compare
-        self._instance: Compare
         if isinstance(names, str):
             names = (names,)
         elif names is None:
-            names = list(self._instance.sources.keys())
+            names = list(self._compare.sources.keys())
         else:
             names = list(names)
 
         fig, axes = plt.subplots(1, len(names))
-        _suptitle(self._instance, fig, self.where.__name__, local)
+        _suptitle(self._compare, fig, self.where.__name__, local)
 
-        agg = self._instance.aggregate
+        agg = self._compare.aggregate
         subaggs: dict[str, gpd.GeoDataFrame] = {
             name: agg.xs(name, level='name', drop_level=False)
             for name in names

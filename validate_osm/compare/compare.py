@@ -1,7 +1,6 @@
 import functools
 import inspect
 import logging
-import warnings
 from pathlib import Path
 from typing import Union, Iterable, Type, Iterator, Optional
 
@@ -9,19 +8,23 @@ import pandas as pd
 import shapely.geometry.base
 from geopandas import GeoDataFrame
 from geopandas import GeoSeries
-from python_log_indenter import IndentedLoggerAdapter
 
 from validate_osm.compare.aggregate import DescriptorAggregate
 from validate_osm.compare.data import DescriptorData
-from validate_osm.compare.floc import FootprintIlocIndexer
 from validate_osm.compare.matrix import DescriptorMatrix
 from validate_osm.compare.plot import DescriptorPlot
-from validate_osm.source import BBox
+from validate_osm.logger import logger
+from validate_osm.source.bbox import BBox
 from validate_osm.source.footprint import CallableFootprint
+from validate_osm.source.resource_ import DescriptorStatic
+from validate_osm.source.resource_ import StructFile, StructFiles
 from validate_osm.source.source import (
     Source
 )
+from validate_osm.source.preprocessor import CallablePreprocessor
 
+
+# TODO: How do we handle BBox and ensure proper hash?
 
 class Compare:
     data = DescriptorData()
@@ -30,19 +33,21 @@ class Compare:
     batch: Union[GeoDataFrame]
     sources: dict[str, Source]
     matrix = DescriptorMatrix()
-    floc = FootprintIlocIndexer()
 
-    # osm = DescriptorOSM()
+    def preprocess(self) -> None:
+        # Because we only have a set of unique preprocessors, we can allow the preprocessors to preprocess in parallel
+        preprocesses: set[CallablePreprocessor] = {
+            source.resource.preprocess
+            for source in self.sources.values()
+        }
+        for preprocess in preprocesses:
+            sources = (
+                source
+                for source in self.sources.values()
+                if source.resource.preprocess is preprocess
+            )
+            preprocess(*sources)
 
-    @staticmethod
-    def to_json(df: pd.DataFrame):
-        ...
-
-    @staticmethod
-    def to_csv(df: pd.DataFrame):
-        ...
-
-    # TODO: How best can the user specify which files are to be redone?
     def __init__(
             self,
             bbox: BBox,
@@ -58,36 +63,23 @@ class Compare:
             pass
         else:
             raise TypeError(sources)
-
-        self.sources: dict[str, Source] = {
-            source.name: source()
-            for source in sources
-        }
-
-        if bbox is not None:
-            for source in self.sources.values():
-                source.bbox = bbox
         self.bbox = bbox
-        logger = logging.getLogger(__name__.partition('.')[0])
         logger.setLevel(
             logging.DEBUG if debug else
             logging.INFO if verbose else
             logging.WARNING
         )
-        for handler in logger.handlers:
-            if isinstance(handler, logging.StreamHandler):
-                break
-        else:
-            handler = logging.StreamHandler()
-            formatter = logging.Formatter(f"%(levelname)-10s %(message)s")
-            handler.setFormatter(formatter)
-            logger.addHandler(handler)
-        logger = IndentedLoggerAdapter(logger)
-        self.logger = logger
-        for source in self.sources.values():
-            source.logger = self.logger
-        self.redo = redo
         self.serialize = serialize
+
+        self.sources: dict[str, Source] = {
+            source.name: source(
+                bbox=self.bbox,
+                serialize=serialize,
+                compare=self
+            )
+            for source in sources
+        }
+        self.redo = redo
 
     @property
     def redo(self):
@@ -107,12 +99,13 @@ class Compare:
             raise TypeError(names)
         if 'sources' in self._redo or 'source' in self._redo:
             self._redo = frozenset((*self.sources.keys(), *self._redo))
-        for name, source in self.sources.items():
-            if name in self._redo:
-                self._redo = frozenset(('data', 'aggregate', *self._redo))
-                source.redo = True
-            else:
-                source.redo = False
+        # for name, source in self.sources.items():
+        #     if name in self._redo:
+        #         self._redo = frozenset(('data', 'aggregate', *self._redo))
+        #         source.redo = True
+        #     else:
+        #         source.redo = False
+        #
 
     @redo.deleter
     def redo(self):
@@ -140,6 +133,10 @@ class Compare:
     @property
     def footprints(self) -> GeoDataFrame:
         return self.footprint.gdf
+
+    @footprints.deleter
+    def footprints(self):
+        del self.footprints
 
     @property
     def identity(self) -> int | str:
@@ -177,11 +174,6 @@ class Compare:
         else:
             raise ValueError(stage)
 
-    # def iloc(self, key: int) -> GeoDataFrame:
-    #     loc = self.footprints.iloc[key].index
-    #     idx = pd.IndexSlice
-    #     return self.aggregate.loc[idx[loc, :], :]
-
     @functools.cached_property
     def name(self) -> str:
         names = list(self.sources.keys())
@@ -196,71 +188,6 @@ class Compare:
         return f'{self.__class__.__name__}(bbox={repr(self.bbox)}, names={self.names})'
         # return f'{self.__class__.__name__}[{self.name}]'
 
-    #
-    # def __getitem__(self, items) -> 'Compare':
-    #     if not isinstance(items, tuple):
-    #         items = (items,)
-    #     data = self.data
-    #     agg = self.aggregate
-    #
-    #     # # [[94.1, -70, 94.8, -72]] or [BBox(94.1, -70, 94.8, -72)]
-    #     try:
-    #         bbox = next(
-    #             item for item in items
-    #             if isinstance(item, (list, BBox))
-    #         )
-    #     except StopIteration:
-    #         bbox = self.bbox
-    #         footprint = self.footprint
-    #     else:
-    #         if isinstance(bbox, list):
-    #             # Flipped because it's typically constructed with ellipsoidal
-    #             projected = BBox(bbox, crs='3857')
-    #             polygon = projected.ellipsoidal
-    #         elif isinstance(bbox, BBox):
-    #             projected = bbox.to_crs(3857)
-    #             # TODO: Why is it ellipsoidal and not cartesian? Something doesn't seem right.
-    #             polygon = projected.ellipsoidal
-    #             # The issue of flipped coords with ellipsoidal/cartesian is very annoying
-    #
-    #         footprint = self.footprint[polygon]
-    #         identifiers = set(footprint.gdf.index.get_level_values('ubid'))
-    #         data = data[data.index.get_level_values('ubid').isin(identifiers)]
-    #         agg = agg[agg.index.get_level_values('ubid').isin(identifiers)]
-    #
-    #     # ['osm', 'msbf']
-    #     names = {
-    #         item for item in items
-    #         if isinstance(item, str)
-    #     }
-    #     if names:
-    #         data = data[data.index.get_level_values('name').isin(names)]
-    #         agg = data[data.index.get_level_values('name').isin(names)]
-    #         sources = {
-    #             name: source
-    #             for name, source in self.sources.items()
-    #             if name in names
-    #         }
-    #     else:
-    #         sources = self.sources
-    #
-    #     data['iloc'] = pd.Series(range(len(data)), dtype='int32')
-    #     agg['iloc'] = pd.Series(range(len(agg)), dtype='int32')
-    #
-    #     compare = Compare(
-    #         bbox,
-    #         redo=None,
-    #         debug=False,
-    #         verbose=False,
-    #         serialize=False
-    #     )
-    #     compare.data = data
-    #     compare._footprint = footprint
-    #     compare.aggregate = agg
-    #     # Perhaps create a new Source instance that encapsulates a smaller .data
-    #     compare.sources = sources
-    #     return compare
-
     def __getitem__(self, item) -> 'Compare':
         footprint = self.footprint[item]
         identifiers = set(footprint.gdf.index.get_level_values(self.identity))
@@ -271,9 +198,27 @@ class Compare:
         compare.agg = self.aggregate[self.aggregate.index.get_level_values(self.identity).isin(identifiers)]
         return compare
 
+    # @functools.cached_property
+    # def files(self) -> list[StructFile, StructFiles]:
+    #     return [
+    #         file
+    #         for source in self.sources.values()
+    #         if issubclass((resource := source.__class__.resource).__class__, DescriptorStatic)
+    #         for file in resource.files
+    #     ]
+
+    @functools.cached_property
+    def sources_files(self) -> list[tuple[Source, Union[StructFile, StructFiles]]]:
+        return [
+            (source, file)
+            for source in self.sources.values()
+            if issubclass((resource := source.__class__.resource).__class__, DescriptorStatic)
+            for file in resource.files
+        ]
+
     @functools.cached_property
     def directory(self) -> Path:
-        return Path(inspect.getfile(self.__class__)).parent / self.name
+        return Path(inspect.getfile(self.__class__)).parent / self.name / str(self.bbox)
 
     def matched(self, name: Union[None, int | str, Iterable[int | str]] = None) -> GeoDataFrame:
         """
@@ -388,6 +333,7 @@ class Compare:
                     yield (a - b) / a
                 else:
                     yield (b - a) / b
+
 
         return pd.Series(gen(), index=pd.Index(and_.keys(), name=self.identity), dtype='float64')
 

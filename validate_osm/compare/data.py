@@ -2,19 +2,21 @@ import dataclasses
 import logging
 import os
 from pathlib import Path
-from typing import Generator, Union, Type, Any
-from typing import Optional
+from typing import Union, Type, Any, Iterable
 from weakref import WeakKeyDictionary
 
 import geopandas as gpd
+import jsonpath_ng.ext.parser
 import numpy as np
 import pandas as pd
 from geopandas import GeoDataFrame
 
-from validate_osm.source import File
+from validate_osm.logger import logged_subprocess, logger
+from validate_osm.source.source import Source
 from validate_osm.util import concat
-from validate_osm.util.scripts import logged_subprocess
 
+if False | False:
+    from validate_osm.compare import Compare
 
 @dataclasses.dataclass
 class StructData:
@@ -34,100 +36,110 @@ class StructData:
         return self.name
 
 
-# footprints/
 class DescriptorData:
     cache: WeakKeyDictionary[object, GeoDataFrame] = WeakKeyDictionary()
 
     def __init__(self):
-        self._instance = None
-        self._owner = None
+        self.compare = None
+        self.owner = None
 
-    def __get__(self, instance: object, owner: Type) -> Union[GeoDataFrame, 'DescriptorData']:
+    def __get__(self, instance: 'Compare', owner: Type['Compare']) -> Union[GeoDataFrame, 'DescriptorData']:
         if instance in self.cache:
-            # TODO: does .copy() slow down significantly?
             return self.cache[instance]
-
-        self._owner = owner
+        self.compare = instance
+        self.owner = owner
         if instance is None:
             return self
 
-        from validate_osm.compare.compare import Compare
-        owner: Optional[Type[Compare]]
-        instance: Compare
-        self._instance = instance
         path = self.path
-        # TODO: Perhaps if there is a file with a bbox that contains instance.bbox, load
-        #   that bbox, .within it,
-        if path.exists() and 'data' not in instance.redo:
-            with logged_subprocess(
-                    instance.logger,
-                    f'reading {instance.name}.data from {path} ({File.size(path)})',
-                    timed=False
-            ):
+        if not self.redo and path.exists():
+            with logged_subprocess(f'reading {instance.name}.data from {path}', timed=False):
                 self.__set__(instance, gpd.read_feather(path))
         else:
-            with logged_subprocess(instance.logger, f'building {instance.name}.data'), self as data:
-                with logged_subprocess(instance.logger, 'getting footprints'):
-                    _ = self._instance.footprints
-                with logged_subprocess(instance.logger, 'applying footprints'):
-                    self.__set__(instance, instance.footprint(data))
+            instance.preprocess()
+            with logged_subprocess(f'extracting {instance.name}.data'):
+                self.__set__(instance, self.extract())
+            with logged_subprocess(f'transforming {instance.name}.data'):
+                # TODO: Wtf
+                self.compare = instance
+                self.owner = owner
+                self.__set__(instance, self.transform())
+            with logged_subprocess(f'loading {instance.name}.data', logging.DEBUG, False):
+                self.load()
+
         return self.__get__(instance, owner)
 
-    # I like using enter/exit with descriptors because the __exit__ is the perfect place for serialization, logging,
-    #   checking, etc. without creating spaghetti code that is incompatible with inheritance or added features.
-    def __enter__(self) -> GeoDataFrame:
-        # __enter__ is before the data is footprinted
-        from validate_osm.compare.compare import Compare
-        self._instance: Compare
-        self._owner: Type[Compare]
 
-        # We must concatenate DataFrames instead of going purely by Series because some columns
-        #   may return a single-value, which must be repeated to the same length of other columns
-        # To preserve SourceOSM.relation and SourceOSM.way indices, we must first
-        def datas() -> Generator[gpd.GeoDataFrame, None, None]:
-            for name, source in self._instance.sources.items():
-                data: GeoDataFrame = source.data
-                data = data.reset_index()
-                data['name'] = name
+        # path = self.path
+        # if path.exists() and not self.redo:
+        #     with logged_subprocess(f'reading {instance.name}.data from {path}', timed=False):
+        #         self.__set__(instance, gpd.read_feather(path))
+        # else:
+        #     instance.preprocess()
+        #     with logged_subprocess(f'building {instance.name}.data'):
+        #         self.__set__(instance, self.extract())
+        #         with logged_subprocess('getting footprints'):
+        #             _ = instance.footprints
+        #         with logged_subprocess('applying footprints'):
+        #             self.__set__(instance, instance.footprint(self.__get__(instance, owner)))
+        #         self.compare = instance  # TODO: Still necessary?
+        #     self.__get__(instance, owner).to_feather(self.path)
+        #
+        # return self.__get__(instance, owner)
+
+    def extract(self) -> GeoDataFrame:
+        data = concat(self)
+        inval = data['geometry'].isna() | data['centroid'].isna()
+        if any(inval):
+            msg = ', '.join(str(tuple) for tuple in data[inval].index)
+            logger.warning(f'invalid warning: {msg}')
+            data = data[~inval]
+
+        if self.compare is None:
+            raise ValueError
+
+        return data
+
+    def transform(self):
+        compare = self.compare
+        owner = self.owner
+        with logged_subprocess('getting footprints'):
+            _ = compare.footprints
+        with logged_subprocess('applying footprints'):
+            data = compare.footprint(self.__get__(compare, owner))
+        if self.compare is None:
+            raise ValueError
+        return data
+
+    def load(self):
+        if not self.compare:
+            raise ValueError(self.compare)
+        if self.compare.serialize:
+            data = self.cache[self.compare]
+            path = self.path
+            if not path.parent.exists():
+                os.makedirs(path.parent)
+            with logged_subprocess(f'serializing {self.compare.name}.data'):
+                data.to_feather(path)
+
+
+    def __hash__(self):
+        return hash(self.compare)
+
+    def __eq__(self, other):
+        return self.compare == other
+
+    def __iter__(self):
+        sources: Iterable[Source] = self.compare.sources.values()
+        for source in sources:
+            for data in source:
+                data['name'] = source.name
                 if 'id' not in data:
                     data['id'] = np.nan
                 if 'group' not in data:
                     data['group'] = np.nan
                 data = data.set_index(['name', 'id', 'group'], drop=True)
                 yield data
-                # TODO: For some reason this logger.debug was causing me errors?
-                # sourcename = source.name
-                # logger = self._instance.logger
-                # logger.debug(f'deleting {sourcename}.resource')
-                del source.data
-
-        with logged_subprocess(self._instance.logger, f'concatenating {self._instance.name}.data', ):
-            data = concat(datas())
-
-        # TODO: Investigate how these invalid geometries came to be
-        inval = data['geometry'].isna() | data['centroid'].isna()
-        if any(inval):
-            msg = ', '.join(str(tuple) for tuple in data[inval].index)
-            self._instance.logger.warning(f'invalid geometry: {msg}')
-            data = data[~inval]
-
-        self.__set__(self._instance, data)
-        return self.__get__(self._instance, 'data')
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        from validate_osm.compare.compare import Compare
-        self._instance: Compare
-        data = self.cache[self._instance]
-        if self._instance.serialize:
-            path = self.path
-            if not path.parent.exists():
-                os.makedirs(path.parent)
-            with logged_subprocess(
-                    self._instance.logger,
-                    f'serializing {self._owner.__name__}.data {path}',
-                    timed=False
-            ):
-                data.to_feather(path)
 
     def __delete__(self, instance):
         if instance in self.cache:
@@ -138,13 +150,19 @@ class DescriptorData:
         self.cache[instance] = gdf
 
     def __repr__(self):
-        return f'{self._instance}.data'
+        return f'{self.compare}.data'
 
     @property
     def path(self) -> Path:
-        from validate_osm.compare.compare import Compare
-        self._instance: Compare
-        return self._instance.directory / str(self._instance.bbox) / 'data.feather'
+        return self.compare.directory / 'data.feather'
 
     def delete(self):
         os.remove(self.path)
+
+    @property
+    def redo(self):
+        for string in ('data', *self.compare.sources.keys()):
+            if string in self.compare.redo:
+                return True
+        return False
+

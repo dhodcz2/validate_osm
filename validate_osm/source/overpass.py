@@ -1,3 +1,5 @@
+
+from validate_osm.source.bbox import BBox
 import functools
 import itertools
 from typing import Iterator, Type, Callable
@@ -9,26 +11,27 @@ import pandas as pd
 import psutil
 from OSMPythonTools.overpass import OverpassResult, Overpass, Element
 
-from validate_osm.source.resource import Resource
-from validate_osm.source.source import Source
+from validate_osm.logger import logger
+from validate_osm.source.resource_ import Resource
 
+from validate_osm.source.preprocessor import CallableDynamicOverpassPreprocessor
 
 class FragmentBBox:
 
-    def __init__(self, bbox: tuple[int]):
-        self.stack: list[tuple[int]] = [bbox]
+    def __init__(self, bbox: tuple[float]):
+        self.stack: list[tuple[float]] = [bbox]
 
-    def peak(self) -> tuple[int]:
+    def peak(self) -> tuple[float]:
         return self.stack[-1]
 
-    def pop(self) -> tuple[int]:
+    def pop(self) -> tuple[float]:
         return self.stack.pop()
 
     def split(self):
-        pop = self.stack.pop()
-        half = (pop[2] + pop[0]) / 2
-        bottom = (pop[0], pop[1], half, pop[3])
-        top = (half, pop[1], pop[2], pop[3])
+        pop: tuple[float] = self.stack.pop()
+        half: float = (pop[2] + pop[0]) / 2
+        bottom: tuple[float] = (pop[0], pop[1], half, pop[3])
+        top: tuple[float] = (half, pop[1], pop[2], pop[3])
         self.stack.extend((bottom, top))
 
     def __bool__(self):
@@ -41,23 +44,21 @@ class DescriptorWays:
     ESTIMATE_COST_PER_ENTRY_B = 11000
 
     def __get__(self, instance: 'DynamicOverpassResource', owner: Type['DynamicOverpassResource']):
-        self.source = instance.source
         self.resource = instance
         return self
 
     def __iter__(self) -> Iterator[OverpassResult]:
         from validate_osm.source.source_osm import SourceOSM
-        self.source: SourceOSM
-        # fragments = FragmentBBox(self.source.bbox.data.ellipsoidal.bounds)
-        fragments = FragmentBBox(self.source.bbox.to_crs(4326).ellipsoidal.bounds)
+        source: SourceOSM = self.resource.source
+        fragments = FragmentBBox(source.bbox.to_crs(4326).ellipsoidal.bounds)
         while fragments:
             peak = fragments.peak()
-            query = self.source.query(peak, type=self.type, appendix='out count;')
+            query = source.query(peak, type=self.type, appendix='out count;')
             estimate = self.overpass.query(query, timeout=120).countElements() * self.ESTIMATE_COST_PER_ENTRY_B
             if estimate > psutil.virtual_memory().free:
                 fragments.split()
             else:
-                query = self.source.query(fragments.pop(), type=self.type)
+                query = source.query(fragments.pop(), type=self.type)
                 result: OverpassResult = self.overpass.query(query, timeout=300)
                 yield result
 
@@ -131,6 +132,7 @@ class DecoratorEnumerative:
                     continue
                 cache.setdefault(id, {})[name] = vals
                 yield v
+            ...
 
         return wrapper
 
@@ -145,7 +147,7 @@ class DescriptorEnumerative:
     def appendix(self) -> gpd.GeoDataFrame:
         cache = DecoratorEnumerative.cache.setdefault(self.source, {})
         if not len(cache):
-            self.source.logger.warning(
+            logger.warning(
                 f"{self.source.__class__.__name__}.resource has no enumerative entries; this is an unlikely outcome."
             )
         lens = {
@@ -157,7 +159,7 @@ class DescriptorEnumerative:
             for id, length in lens.items()
             for _ in range(length)
         ), name='id')
-        data = self.source.data
+        data = self.source.load
 
         def gen(name, column) -> Iterator[pd.Series]:
             for id, length in lens.items():
@@ -187,13 +189,13 @@ class DynamicOverpassResource(Resource):
     enumerative = DescriptorEnumerative()
     name = 'osm'
     link = 'https://www.openstreetmap.org'
-
-    boundary = True
-
-    def __contains__(self, item):
+    preprocess = CallableDynamicOverpassPreprocessor()
+    def __contains__(self, item: BBox):
+        if not isinstance(item, BBox):
+            raise TypeError(f'expected {BBox}; got {type(item)}')
         return True
 
-    def __get__(self, instance: Source, owner: Type[Source]):
+    def __get__(self, instance, owner):
         self.source = instance
         self.owner = owner
         return self
@@ -209,3 +211,4 @@ class DynamicOverpassResource(Resource):
 
     def __delete__(self, instance):
         pass
+

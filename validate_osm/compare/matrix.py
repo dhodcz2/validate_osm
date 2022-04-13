@@ -5,6 +5,9 @@ from typing import Type, Optional, Any, Generator, Iterator, Union
 import pandas as pd
 from pandas import DataFrame
 
+if False:
+    from validate_osm import Compare
+
 
 class DescriptorExport:
     json = {
@@ -28,8 +31,8 @@ class DescriptorMatrix:
     def __init__(self):
         ...
 
-    def __get__(self, instance, owner):
-        self._instance = instance
+    def __get__(self, instance: 'Compare', owner: Type['Compare']):
+        self._compare = instance
         self._owner = owner
         return self
 
@@ -49,8 +52,6 @@ class DescriptorMatrix:
             values = list(values)
 
         # TODO: This doesn't seem to be sorted.
-        from validate_osm.compare.compare import Compare
-        compare: Compare = self._instance
         if isinstance(columns, (str, int)):
             columns = [columns, ]
         else:
@@ -59,7 +60,7 @@ class DescriptorMatrix:
         columns: list
 
         columns: dict[str, pd.DataFrame] = {
-            source_name: compare.xs(source_name)
+            source_name: self._compare.xs(source_name)
             for source_name in columns
         }
 
@@ -71,7 +72,7 @@ class DescriptorMatrix:
         rows: list
 
         rows: dict[str, pd.DataFrame] = {
-            source_name: compare.xs(source_name)
+            source_name: self._compare.xs(source_name)
             for source_name in rows
         }
 

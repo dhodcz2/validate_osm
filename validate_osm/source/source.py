@@ -1,21 +1,32 @@
 import abc
+from validate_osm.source.resource_ import Resource
+import functools
+import inspect
 import itertools
-import logging
 import warnings
-from typing import Type
-from typing import Optional, Union
+from pathlib import Path
+from typing import Type, Iterator, Optional
+from typing import Union
 
-import geopandas as gpd
 import numpy as np
-import numpy.typing
 import pandas as pd
 from geopandas import GeoDataFrame
 
-from validate_osm.source.bbox import BBox
 from validate_osm.source.aggregate import FactoryAggregate
+from validate_osm.source.bbox import BBox
 from validate_osm.source.data import DecoratorData, DescriptorData
 from validate_osm.source.footprint import CallableFootprint
-from validate_osm.source.resource import StaticBase
+
+from validate_osm.source.resource_ import (
+    DescriptorStatic,
+    DescriptorStaticRegions,
+    DescriptorStaticNaive,
+    StructFile,
+    StructFiles
+)
+
+if False | False:
+    from validate_osm import Compare
 
 warnings.filterwarnings('ignore', message='.*initial implementation of Parquet.*')
 
@@ -29,61 +40,50 @@ class SourceMeta(abc.ABCMeta, type):
 
 
 class Source(abc.ABC, metaclass=SourceMeta):
-    def __init__(self, redo=False):
-        abstracts = [
-            struct
-            for struct in self.__class__.data.structs.values()
-            if struct.abstract
-        ]
-        if abstracts:
-            raise TypeError(f"{self.__class__.__name__} inherited abstract methods for its data: {abstracts}")
-        self.redo = redo
+    resource: Union[GeoDataFrame, DescriptorStaticRegions, DescriptorStaticNaive]
+    data: Union[DescriptorData, GeoDataFrame] = DescriptorData()
+    footprint: Type[CallableFootprint] = CallableFootprint
+    aggregate_factory: Type[FactoryAggregate] = FactoryAggregate
+    name: str
+    link: str
 
-        self.logger = logging.getLogger(__name__.partition('.')[0])
-        # TODO: How can Source add a handler to its own instance of logger without things getting crazy?
-        # self.logger.setLevel(logging.INFO)
-        # handler = logging.StreamHandler()
-        # formatter = logging.Formatter(f"%(levelname)10s %(message)s")
-        # handler.setFormatter(formatter)
-        # self.logger.addHandler(handler)
+    def preprocess(self):
+        self.resource.preprocess(self)
+
+    def __init__(self, redo=False, bbox=None, serialize=False, compare: Optional['Compare'] = None):
+        # TODO
+        # abstracts = [
+        #     struct
+        #     # for struct in self.__class__.data.structs.load.values()
+        #     if struct.abstract
+        # ]
+        # if abstracts:
+        #     raise TypeError(f"{self.__class__.__name__} inherited abstract methods for its data: {abstracts}")
+        self.redo = redo
+        self.bbox = bbox
+        self.serialize = serialize
+        self.compare = compare
 
     def __contains__(self, item: BBox) -> bool:
         return item in self.__class__.resource
 
-    # def __eq__(self, other):
-    #     TODO: True if the sources have implemented all of the same data methods
-    #     raise NotImplementedError
-
-    '''
-    raw >> data >> groups >> aggregate >> identity >> exclude >> batch
-
-    pipeline methods except for raw extraction methods are defined with _ and decorated with the name to minimize
-    namespace clutter
-    '''
-
-    resource: Union[gpd.GeoDataFrame, StaticBase]
-    data: Union[DescriptorData, GeoDataFrame] = DescriptorData()
-    footprint: Type[CallableFootprint] = CallableFootprint
-    # groups: Union[Groups, DescriptorGroup] = DescriptorGroup()
-    aggregate_factory: Type[FactoryAggregate] = FactoryAggregate
-    name: str
-    link: str
-    resource: Union[StaticBase, pd.DataFrame, gpd.GeoDataFrame]
-    ignore_file = False
+    def __iter__(self) -> Iterator[GeoDataFrame]:
+        bbox = self.bbox.to_crs(3857).ellipsoidal
+        for file in self.resource[self.bbox]:
+            data = file.load_source()
+            data = data[data.intersects(bbox)]
+            yield data
 
     @property
     def redo(self):
-        return self._ignore_file
+        if self.compare is not None:
+            return self.name in self.compare.redo
+        else:
+            return self._redo
 
     @redo.setter
     def redo(self, val: bool):
-        if not isinstance(val, bool):
-            raise TypeError(val)
-        self._ignore_file = val
-
-    @redo.deleter
-    def redo(self):
-        self._ignore_file = False
+        self._redo = val
 
     @classmethod
     @property
@@ -103,13 +103,8 @@ class Source(abc.ABC, metaclass=SourceMeta):
         data = self.data
         return data.set_index(pd.Index(data=itertools.repeat(np.nan, len(data)), name='group'), append=True)
 
-    def resource(self) -> Union[StaticBase]:
+    def resource(self) -> Union[DescriptorStatic]:
         """An instance or Iterator of instances that encapsulate the raw data that is entering this pipeline."""
-
-    resource = (property(abc.abstractmethod(resource)))
-
-    def exclude(self) -> Optional[numpy.typing.NDArray[bool]]:
-        """ Iterates across Source.aggregate and yields True if entry is to be excluded from Source.batch """
 
     @classmethod
     @property
@@ -129,12 +124,8 @@ class Source(abc.ABC, metaclass=SourceMeta):
 
     @DecoratorData(dtype='geometry', crs=3857, dependent={'geometry'})
     def centroid(self):
-        return (
-            self.data
-                .loc[self.data['geometry'].notna(), 'geometry']
-                .to_crs(3857)
-                .centroid
-        )
+        loc = self.data['geometry'].notna()
+        return self.data.loc[loc, 'geometry'].centroid
 
     @DecoratorData(dtype='string', crs=None, dependent='centroid')
     def ref(self):
@@ -150,3 +141,6 @@ class Source(abc.ABC, metaclass=SourceMeta):
         #     shapely.geometry.Point(centroid.y, centroid.x)
         #     for centroid in self.data.loc[loc, 'centroid'].to_crs(4326)
         # ), index=self.data.loc[loc].index)
+
+    def __hash__(self):
+        return hash(self.name)

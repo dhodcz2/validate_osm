@@ -12,8 +12,13 @@ import numpy.typing
 import pandas as pd
 from geopandas import GeoDataFrame
 
-from validate_osm.source import data, Source, SourceOSM
-from validate_osm.source.aggregate import FactoryAggregate
+from validate_osm import (
+    DecoratorData,
+    Source,
+    SourceOSM,
+    FactoryAggregate,
+
+)
 from validate_osm.source.footprint import CallableFootprint
 
 
@@ -21,8 +26,9 @@ class BuildingCallableFootprint(CallableFootprint):
     def identify(self, gdf: GeoDataFrame) -> pd.Series:
         def ubid():
             warnings.filterwarnings('ignore', 'geographic CRS')
-            centroid = gdf['centroid'].to_crs(4326)
+            # centroid = gdf['centroid'].to_crs(4326)
             geometry: gpd.GeoSeries = gdf['geometry'].to_crs(4326)
+            centroid = geometry.centroid
             for x, y, (minx, miny, maxx, maxy) in zip(centroid.x, centroid.y, geometry.bounds.values):
                 #     # TODO: codeLength=11 appropriate? Programatically determine code length?
                 yield buildingid.code.encode(
@@ -97,12 +103,12 @@ class BuildingSource(Source):
         #
         return None
 
-    @data('string')
+    @DecoratorData('string')
     @abc.abstractmethod
     def address(self):
         """The address of the building"""
 
-    @data('datetime64[ns]')
+    @DecoratorData('datetime64[ns]')
     @abc.abstractmethod
     def start_date(self):
         """The date at which the building began construction"""
@@ -319,6 +325,8 @@ class HeightFactoryAggregate(FactoryAggregate):
                 for i in range(len(self._groups.iloc_grouped))
             )
 
+        # TODO: look into timezone-aware data
+        warnings.filterwarnings('ignore', '.*timezone-aware.*')
         return pd.Series(data=gen(), index=self._groups.index, dtype='datetime64[ns]')
 
     def start_date(self):
@@ -364,12 +372,12 @@ class HeightFactoryAggregate(FactoryAggregate):
 class Height(BuildingSource):
     aggregate_factory = HeightFactoryAggregate
 
-    @data.validate('Float64')
+    @DecoratorData('Float64')
     @abc.abstractmethod
     def floors(self):
         """The number of floors in the building"""
 
-    @data.validate('Float64')
+    @DecoratorData('Float64')
     @abc.abstractmethod
     def height_m(self):
         """The physical height of the building in meters"""

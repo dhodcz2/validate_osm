@@ -1,4 +1,3 @@
-from shapely.geometry import box
 import itertools
 import logging
 import os
@@ -13,10 +12,14 @@ import shapely
 from annoy import AnnoyIndex
 from geopandas import GeoDataFrame
 from networkx import connected_components
+from shapely.geometry import box
 from shapely.geometry.base import BaseGeometry
 
+from validate_osm.logger import logger, logged_subprocess
 from validate_osm.source.bbox import BBox
-from validate_osm.util.scripts import logged_subprocess
+
+if False:
+    from validate_osm.compare.compare import Compare
 
 
 # TODO: Perhaps the footprints can be accelerated with multiprocessing over the Summer
@@ -24,9 +27,7 @@ from validate_osm.util.scripts import logged_subprocess
 #   because the geometry cannot be multiprocessed, the geometric testing is done in serial
 
 class CallableFootprint:
-    def __init__(self, compare: object):
-        from validate_osm.compare.compare import Compare
-        compare: Compare
+    def __init__(self, compare: 'Compare'):
         self.compare = compare
         self.path = compare.directory / 'footprint.feather'
         self._gdf = None
@@ -73,11 +74,11 @@ class CallableFootprint:
         if self._gdf is not None:
             return self._gdf
         if 'footprint' not in self.compare.redo and 'footprints' not in self.compare.redo and self.path.exists():
-            with logged_subprocess(self.compare.logger, f'reading footprints from {self.path}', timed=False):
+            with logged_subprocess(f'reading footprints from {self.path}', timed=False):
                 footprints = self.gdf = gpd.read_feather(self.path)
                 return footprints
         else:
-            with logged_subprocess(self.compare.logger, 'creating footprints'):
+            with logged_subprocess('creating footprints'):
                 try:
                     with self as footprints:
                         return footprints
@@ -96,12 +97,13 @@ class CallableFootprint:
 
     def __enter__(self) -> GeoDataFrame:
         # If footprints is called before data, there is an infinite recursion
+        # TODO: We should accelerate this somehow
         if self.compare not in self.compare.__class__.data.cache:
             raise RecursionError
         data = self.compare.data
-        data = data[['geometry', 'centroid']].copy()
-        data['geometry'] = data['geometry'].to_crs(3857)
-        data['centroid'] = data['centroid'].to_crs(3857)
+        # data = data[['geometry', 'centroid']].copy()
+        # data['geometry'] = data['geometry'].to_crs(3857)
+        # data['centroid'] = data['centroid'].to_crs(3857)
 
         # FIrst, aggregate the geometries where relation or way are identical.
         G = networkx.Graph()
@@ -138,26 +140,25 @@ class CallableFootprint:
         data['area'] = data.area
         data = data.sort_values(by='area', ascending=False)
         footprints = pd.Series(range(len(data)), index=data.index)
+        geometries = data['geometry']
 
         annoy = AnnoyIndex(2, 'euclidean')
         for i, centroid in enumerate(data['centroid']):
             annoy.add_item(i, (centroid.x, centroid.y))  # lower i, higher area
         annoy.build(10)
 
+
+
         for i, (g, a) in enumerate(data[['geometry', 'area']].values):
             for n in annoy.get_nns_by_item(i, 30):
-                if i <= n:  # neighbor is smaller or neighbor is the same item
+                if i <= n:
                     continue
-                footprint: pd.Series = data.iloc[n]
-                geometry: shapely.geometry.base.BaseGeometry = footprint['geometry']
+                geometry: BaseGeometry = geometries.iat[n]
                 if not geometry.intersects(g):
                     continue
-                # TODO: It seems that there are some cases where intersection is below 50% but
-                #   it is still appropriate.
-                #   Perhaps this is still necessary to prevent against odd cases.
                 if geometry.intersection(g).area / a < .1:
                     continue
-                footprints.iloc[i] = footprints.iloc[n]
+                footprints.iat[i] = footprints.iat[n]
                 break
 
         groupby = footprints.groupby(footprints)
@@ -182,29 +183,25 @@ class CallableFootprint:
             'geometry': gpd.GeoSeries(geometry(), crs=data['geometry'].crs),
             'centroid': gpd.GeoSeries(centroid(), crs=data['centroid'].crs)
         })
-        self.compare.logger(f'{len(footprints)=} from {len(data)=}')
-        footprints['geometry'] = footprints['geometry'].to_crs(3857)
-        footprints['centroid'] = footprints['centroid'].to_crs(3857)
 
-        # TODO: Where is iloc applied and sorted?
         identity = self.identify(footprints)
         footprints = footprints.set_index(identity)
-        self.compare.logger.debug(f'identified footprints with {identity.name=}')
+        logger.debug(f'identified footprints with {identity.name=}')
 
         self.gdf = footprints
         return footprints
 
     def identify(self, gdf: GeoDataFrame) -> pd.Series:
+        """Inherit this class and overwrite to determine how entries will be identified across datasets, eg. UBID"""
         return pd.Series(range(len(gdf)), index=gdf.index, name='i', dtype='Int64')
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        path = self.path
-        gdf = self._gdf
-        if not path.parent.exists():
-            os.makedirs(path.parent)
-        with logged_subprocess(self.compare.logger, f'serializing footprints to {path}', timed=False):
-            gdf.to_feather(path)
-        self._gdf = gdf
+        if exc_type is not None and self.compare.serialize:
+            path = self.path
+            if not path.parent.exists():
+                os.makedirs(path.parent)
+            with logged_subprocess(f'serializing footprints to {path}', timed=False):
+                self._gdf.to_feather(path)
 
     @property
     def _annoy(self) -> AnnoyIndex:
@@ -218,7 +215,7 @@ class CallableFootprint:
         data['geometry'] = data['geometry'].to_crs(3857)
         data['centroid'] = data['centroid'].to_crs(3857)
         data['area'] = data['geometry'].area
-        with logged_subprocess(self.compare.logger, 'building annoy', level=logging.DEBUG):
+        with logged_subprocess('building annoy', level=logging.DEBUG):
             annoy = self._annoy
         footprints = self.gdf
 
@@ -240,7 +237,8 @@ class CallableFootprint:
                     # TODO: Should we raise an exception if something hasn't been footprinted?
                     yield np.nan
 
-        index = pd.Series(footprint(), index=data.index, name=footprints.index.name)
+        with logged_subprocess('applying footprint'):
+            index = pd.Series(footprint(), index=data.index, name=footprints.index.name)
         names = [footprints.index.name, *data.index.names]
         data = data.set_index(index, drop=False, append=True)
         data = data.reorder_levels(names)

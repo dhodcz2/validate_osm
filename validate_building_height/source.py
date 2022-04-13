@@ -1,21 +1,22 @@
 import datetime
-from shapely.geometry import box
 from typing import Iterable
 
 import numpy as np
 import pandas as pd
 import shapely
+from shapely.geometry import box
 
 from validate_building_height.building import Height, BuildingSourceOSM
-from validate_osm.source import *
-from validate_osm.source import BBox
-from validate_osm.source.resource import File
+from validate_building_height.resource_ import (
+    MicrosoftBuildingFootprints,
+    MicrosoftBuildingFootprints2017,
+    OpenCityModel
+)
+from validate_osm import *
 
 
-class SourceMSBuildingFootprints(Height):
-
-    from validate_building_height.regional import MSBuildingFootprints
-    resource = MSBuildingFootprints()
+class HeightMicrosoftBuildingFootprints(Height):
+    resource = MicrosoftBuildingFootprints()
 
     def geometry(self):
         return self.resource['geometry']
@@ -36,45 +37,70 @@ class SourceMSBuildingFootprints(Height):
         ...
 
 
-# class SourceOpenCityData(Height):
-#     from validate_building_height.regional import OpenCityData
-#     resource = OpenCityData()
-#
-#     def geometry(self):
-#         ...
-#
-#     def timestamp(self):
-#         ...
-#
-#     def address(self):
-#         ...
-#
-#     def height_m(self):
-#         ...
-#
-#     def start_date(self):
-#         ...
-#
-#     def floors(self):
-#         ...
-#
+class HeightMicrosoftBuildingFootprints2017(Height):
+    resource = MicrosoftBuildingFootprints2017()
+
+    def geometry(self):
+        return self.resource.geometry
+
+    def timestamp(self):
+        ...
+
+    def address(self):
+        ...
+
+    def height_m(self):
+        return self.resource['Height']
+
+    def start_date(self):
+        ...
+
+    def floors(self):
+        ...
+
+
+class HeightOpenCityModel(Height):
+    resource = OpenCityModel()
+
+    def geometry(self):
+        return self.resource.geometry
+
+    def timestamp(self):
+        ...
+
+    def address(self):
+        ...
+
+    def height_m(self):
+        return self.resource['height']
+
+    def start_date(self):
+        ...
+
+    def floors(self):
+        ...
+
 
 class HeightOSM(BuildingSourceOSM, Height):
     bbox = True
 
-    @enumerative(float)
+    @DecoratorEnumerative(float)
     def floors(self):
         yield from (
             element.tag('building:levels')
             for element in self.resource
         )
 
-    @enumerative(float)
+    @DecoratorEnumerative(float)
     def height_m(self):
-        yield from (
-            element.tag('height')
-            for element in self.resource
-        )
+        # TODO: How do we convert to meters if it says feet?
+        for element in self.resource:
+            # height = element.tag('height')
+            # if height is not None and height[-1] == "'":
+            #     yield float(height[:-1]) * .3048
+            # else:
+            #     yield height
+            yield element.tag('height')
 
 
 class HeightChicagoBuildingFootprints(Height):
@@ -82,15 +108,15 @@ class HeightChicagoBuildingFootprints(Height):
         41.20771257335822, -88.71312626050252, 42.6664014741069, -86.88939577195931
     ), crs='epsg:4326')
 
-    resource = StaticNaive(
-        files=File(
+    resource = DescriptorStaticNaive(
+        file=StructFile(
             url='https://data.cityofchicago.org/api/geospatial/hz9b-7nh8?method=export&format=GeoJSON',
-            path=StaticNaive.directory / 'Building Footprints (current).geojson',
+            source=None,
+            name='Building Footprints (current).geojson'
         ),
         crs=4326,
         name='cbf',
         link='https://data.cityofchicago.org/Buildings/Building-Footprints-current-/hz9b-7nh8',
-        boundary=box(41.23370459141704, -88.67875452074257, 42.60354605338037, -86.83312195248142)
     )
 
     def geometry(self) -> Iterable[shapely.geometry.base.BaseGeometry]:
