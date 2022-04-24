@@ -1,18 +1,23 @@
+from IPython.core.display import Image, display
+import PIL
 import io
 import abc
 import functools
 import inspect
 import math
 import os
+import warnings
 from dataclasses import field, dataclass
 from pathlib import Path
 from typing import Collection, Type
 from typing import Iterator, Iterable, Optional
 from zipfile import ZipFile
 
+import PIL
 import matplotlib.pyplot
 import matplotlib.pyplot as plt
 import numpy
+import numpy as np
 import pandas as pd
 import pyproj
 import shapely.geometry
@@ -21,11 +26,18 @@ from geopandas import GeoDataFrame, GeoSeries
 from pandas import DataFrame
 from pandas import Series
 
-from slippy import deg2num, num2deg
+from streetview_batch.slippy import deg2num, num2deg
 
 
 class Points:
-    __slots__ = None
+    __slots__ = ['x', 'y']
+
+    def __repr__(self):
+        tuples = (
+            str(tup)
+            for tup, _ in zip(self, range(3))
+        )
+        return ', '.join(tuples) + '...'
 
     def __init__(self, x: Iterable[float], y: Iterable[float]):
         self.x = x
@@ -46,7 +58,7 @@ class Geographic(Points):
 class Metric(Points):
     @classmethod
     def from_geographic(cls, points: 'Geographic'):
-        trans = pyproj.Transformer.from_crs(3857, 4326)
+        trans = pyproj.Transformer.from_crs(4326, 3857)
         y, x = trans.transform(points.y, points.x)
         return Metric(x, y)
 
@@ -134,37 +146,40 @@ class StructIterableCoords:
             tiles
         )
 
+    def __repr__(self):
+        return repr(self.geographic)
+
 
 class Distance(abc.ABC):
     def __init__(
             self,
-            camera: StructIterableCoords | tuple,
-            heading: Collection[float] | float,
-            image: Collection[str | Path] | str | Path,
+            cameras: StructIterableCoords | tuple,
+            headings: Collection[float] | float,
+            images: str | Path,
             poid: Collection[str] | str,
             **kwargs
     ):
-        if isinstance(camera, (tuple, list)):
-            geographic = Geographic(x=[camera[0]], y=[camera[1]])
+        if isinstance(cameras, (tuple, list)):
+            geographic = Geographic(x=[cameras[0]], y=[cameras[1]])
             self.camera = StructIterableCoords.from_geographic(geographic)
-        elif isinstance(camera, StructIterableCoords):
-            self.camera = camera
+        elif isinstance(cameras, StructIterableCoords):
+            self.camera = cameras
         else:
-            raise TypeError(camera)
+            raise TypeError(cameras)
 
-        if isinstance(heading, float):
-            self.heading = (heading,)
-        elif isinstance(heading, Collection):
-            self.heading = heading
+        if isinstance(headings, float):
+            self.heading = (headings,)
+        elif isinstance(headings, Collection):
+            self.heading = headings
         else:
-            raise TypeError(heading)
+            raise TypeError(headings)
 
-        if isinstance(image, (str, Path)):
-            self.image = (image,)
-        elif isinstance(image, Collection):
-            self.image = image
+        if isinstance(images, (str, Path)):
+            self.image = images
+        elif isinstance(images, Collection):
+            self.image = images
         else:
-            raise TypeError(image)
+            raise TypeError(images)
 
         if isinstance(poid, (str)):
             self.poid = (poid,)
@@ -180,14 +195,14 @@ class Distance(abc.ABC):
     @functools.cached_property
     def _displacement(self) -> list[tuple[float, float]]:
         def displacement() -> Iterator[tuple[float, float]]:
-            for camera, tile_displacement, heading, image, northwest_bound in zip(
+            for camera, tile_displacement, heading, image, northwest_bound, tile in zip(
                     self.camera.metric,
                     self.camera.tiles.displacement,
                     self.heading,
                     self.image,
-                    self._northwest.metric
+                    self._northwest.metric,
+                    self.camera.tiles
             ):
-                image = skimage.io.imread(image)
                 theta = (450 - heading) % 360
                 red = image[:, :, 0]
                 slope = math.tan(math.radians(theta))
@@ -195,14 +210,15 @@ class Distance(abc.ABC):
                 yinc = 1 if theta < 180 else -1
                 xinc = 1 if heading < 180 else -1
                 slope = abs(slope)
+                # TODO: Why aren't tiles aligned?
 
                 # epsg:3857 to pixels
-                x = int(
+                cx = x = int(
                     (camera[0] - northwest_bound[0])
                     / tile_displacement[0]
                     * 255
                 )
-                y = int(
+                cy = y = int(
                     (camera[1] - northwest_bound[1])
                     / tile_displacement[1]
                     * 255
@@ -352,7 +368,7 @@ class Distance(abc.ABC):
             for d, m in zip(displacement, metric)
         ]
         y = [
-            m[0] + d[0]
+            m[1] + d[1]
             if d is not None
             else None
             for d, m in zip(displacement, metric)
@@ -476,31 +492,34 @@ class BatchDistance(Distance):
             yield twice
     """
 
-    def __init__(
-            self,
-            path_inputs: str,
-            path_metadata: str,
-            path_images: str,
-            **kwargs
-    ):
+    def __init__(self, path_inputs: str, path_metadata: str, path_images: str, **kwargs):
         """
 
         :param path_inputs:
-            zip, directory
+            csv
             lat,lon,heading
         :param path_metadata:
-            zip, directory
+            csv
             status,poid,lat,lon
         :param path_images:
             zip, directory
         """
 
         with open(path_inputs) as f:
-            skiprows = [
-                i
-                for i, line in enumerate(f.readlines())
-                if line.startswith('E')
-            ]
+            rows = np.fromiter((
+                line[0]
+                for line in f.readlines()
+            ), dtype='U1')
+        skiprows = np.fromiter((
+            i
+            for i, char in enumerate(rows)
+            if char == 'E'
+        ), dtype=int)
+        line = pd.Series((
+            i
+            for i, char in enumerate(rows)
+            if char != 'E'
+        ))
         path_inputs = pd.read_csv(
             path_inputs,
             skiprows=skiprows,
@@ -509,9 +528,8 @@ class BatchDistance(Distance):
             dtype={
                 'poid': 'string',
                 'lat': 'Float64',
-                'lon': 'Float64'
-            }
-
+                'lon': 'Float64',
+            },
         )
         path_metadata = pd.read_csv(
             path_metadata,
@@ -520,17 +538,21 @@ class BatchDistance(Distance):
             names=['heading'],
             dtype={
                 'heading': 'Float64'
-            }
+
+            },
         )
         resource = pd.concat((path_metadata, path_inputs), axis=1)
-        resource.set_index('poid')
+        resource['line'] = pd.Series(iter(line), dtype='int16')
+        resource = resource.set_index('poid', drop=False)
+        loc = resource['heading'].isna()
+        if any(loc):
+            warnings.warn('some headers in the file have heading=nan')
+            resource = resource[~loc]
 
         def poid() -> Iterator[str]:
             for poid in resource['poid']:
                 yield poid
                 yield poid
-
-        self._poid = list(poid())
 
         def heading() -> Iterator[float]:
             for heading in resource['heading']:
@@ -539,8 +561,6 @@ class BatchDistance(Distance):
                 if heading < 0:
                     heading += 360
                 yield heading
-
-        self._heading = list(heading())
 
         def camera() -> StructIterableCoords:
             def lon():
@@ -558,25 +578,13 @@ class BatchDistance(Distance):
             tiles = Tiles.from_geographic(geographic)
             return StructIterableCoords(geographic, metric, tiles)
 
-        @property
-        def _image(self):
-            # zip_path = Path(inspect.getfile(self.__class__)).parent / 'static' / 'image.zip'
-            with ZipFile(zip_path) as zf:
-                for x, y in self.camera.tiles:
-                    path = f'19_{y}_{x}_pred.png'
-                    with zf.open(path) as f:
-                        data = io.BytesIO(f)
-                        image = skimage.io.imread(data)
-
         super(BatchDistance, self).__init__(
-            camera=camera(),
-            heading=list(heading()),
-            image=_image(self)
+            cameras=camera(),
+            headings=list(heading()),
+            images=path_images,
+            poid=list(poid()),
+            **kwargs
         )
-
-        # image = skimage.io.imread(f)
-        # yield image
-        # yield image
 
     class DescriptorImages:
         directory: str | Path
@@ -589,6 +597,19 @@ class BatchDistance(Distance):
         def __set__(self, instance, value):
             self.instance = instance
             self.directory = Path(value)
+
+        def __getitem__(self, tile: tuple[float, float]):
+            x, y = tile
+            directory = self.directory
+            if directory.is_dir():
+                path = directory / f"19_{y}_{x}_pred.png"
+                image = skimage.io.imread(path)
+            elif directory.name.endswith('.zip'):
+                with ZipFile(directory) as zf:
+                    path = f'best_images/19_{y}_{x}_pred.png'
+                    with zf.open(path) as f:
+                        image = skimage.io.imread(f)
+            return image
 
         def __iter__(self):
             directory = self.directory
@@ -613,4 +634,14 @@ class BatchDistance(Distance):
 
 
 if __name__ == '__main__':
-    ...
+    batch = BatchDistance(
+        path_inputs='/home/arstneio/PycharmProjects/ValidateOSM/streetview_batch/static/camera/manhattan_gsv.csv',
+        path_metadata='/home/arstneio/PycharmProjects/ValidateOSM/streetview_batch/static/input/manhattan.csv',
+        path_images='/home/arstneio/PycharmProjects/ValidateOSM/streetview_batch/static/bird.zip'
+    )
+    batch.distance
+    batch.plots
+    print()
+    # distance = batch.distance
+    # print()
+    # plots = batch.plots
