@@ -1,66 +1,78 @@
-from IPython.core.display import Image, display
-import PIL
-import io
 import abc
 import functools
-import inspect
+import itertools
 import math
 import os
 import warnings
 from dataclasses import field, dataclass
+from functools import cached_property
 from pathlib import Path
-from typing import Collection, Type
-from typing import Iterator, Iterable, Optional
+from typing import Collection, Type, Any
+from typing import Iterator, Iterable
 from zipfile import ZipFile
 
-import PIL
-import matplotlib.pyplot
+import geopy.distance
 import matplotlib.pyplot as plt
-import numpy
 import numpy as np
 import pandas as pd
 import pyproj
-import shapely.geometry
 import skimage.io
 from geopandas import GeoDataFrame, GeoSeries
 from pandas import DataFrame
 from pandas import Series
 
+# TODO: Is Projected entirely pointless?
 from streetview_batch.slippy import deg2num, num2deg
 
 
-class Points:
-    __slots__ = ['x', 'y']
+# import pyximport
+# pyximport.install()
+# from streetview_batch.cdistance import cdistance
 
-    def __repr__(self):
-        tuples = (
-            str(tup)
-            for tup, _ in zip(self, range(3))
+
+class Points(DataFrame):
+    x: Series
+    y: Series
+    crs: Any
+
+    def __init__(self, x: Iterable[float], y: Iterable[float], crs=None, **kwargs):
+        super(Points, self).__init__({'x': x, 'y': y}, **kwargs)
+        super(Points, self).__setattr__('crs', crs)
+
+    def __iter__(self) -> Iterator[tuple[float]]:
+        yield from self.values
+
+    @property
+    def geoseries(self):
+        loc = self.x.notna()
+        return GeoSeries.from_xy(
+            self.x[loc],
+            self.y[loc],
+            crs=self.crs,
+            index=self.index[loc]
         )
-        return ', '.join(tuples) + '...'
-
-    def __init__(self, x: Iterable[float], y: Iterable[float]):
-        self.x = x
-        self.y = y
-
-    def __iter__(self) -> Collection[tuple[float, float]]:
-        yield from zip(self.x, self.y)
 
 
 class Geographic(Points):
+    def __init__(self, x: Iterable[float], y: Iterable[float], crs=4326, **kwargs):
+        super(Geographic, self).__init__(x, y, crs=crs, **kwargs)
+
     @classmethod
-    def from_metric(cls, points: 'Metric'):
-        trans = pyproj.Transformer.from_crs(4326, 3857)
-        y, x = trans.transform(points.y, points.x)
-        return Geographic(x, y)
+    def from_projected(cls, points: 'Projected'):
+        trans = pyproj.Transformer.from_crs(points.crs, 4326, always_xy=True)
+        x, y = trans.transform(points.x, points.y)
+        return Geographic(x, y, crs=4326, index=points.index)
 
 
-class Metric(Points):
+class Projected(Points):
+    def __init__(self, x: Iterable[float], y: Iterable[float], crs=3857, **kwargs):
+        super(Projected, self).__init__(x, y, crs, **kwargs)
+
     @classmethod
     def from_geographic(cls, points: 'Geographic'):
-        trans = pyproj.Transformer.from_crs(4326, 3857)
-        y, x = trans.transform(points.y, points.x)
-        return Metric(x, y)
+        trans = pyproj.Transformer.from_crs(points.crs, 3857, always_xy=True)
+        x, y = trans.transform(points.x, points.y)
+        return Projected(x, y, crs=3857, index=points.index)
 
 
 class Tiles(Points):
@@ -70,10 +82,9 @@ class Tiles(Points):
             deg2num(x, y, 19)
             for x, y in geographic
         ]
-        return Tiles(
-            x=[x for x, y in tiles],
-            y=[y for x, y in tiles]
-        )
+        x = [x for x, y in tiles]
+        y = [y for x, y in tiles]
+        return Tiles(x, y, index=geographic.index)
 
     def to_geographic(self) -> Geographic:
         points = [
@@ -82,67 +93,64 @@ class Tiles(Points):
         ]
         return Geographic(
             x=[x for x, y in points],
-            y=[y for x, y in points]
+            y=[y for x, y in points],
+            crs=4326,
+            index=self.index
         )
 
-    @functools.cached_property
-    def nw_bound(self) -> Metric:
+    @cached_property
+    def nw_bound(self) -> Projected:
         geographic = self.to_geographic()
-        metric = Metric.from_geographic(geographic)
-        return metric
+        projected = Projected.from_geographic(geographic)
+        return projected
 
-    @functools.cached_property
-    def se_bound(self) -> Metric:
+    @cached_property
+    def se_bound(self) -> Projected:
         tiles = Tiles(
-            x=[x + 1 for x in self.x],
-            y=[y + 1 for y in self.y],
+            x=self.x + 1,
+            y=self.y + 1,
         )
         geographic = tiles.to_geographic()
-        return Metric.from_geographic(geographic)
+        return Projected.from_geographic(geographic)
 
-    @functools.cached_property
-    def displacement(self) -> Metric:
-        x = [
-            se[0] - nw[0]
-            for nw, se in zip(self.nw_bound, self.se_bound)
-        ]
-        y = [
-            se[1] - nw[1]
-            for nw, se in zip(self.nw_bound, self.se_bound)
-        ]
-        return Metric(x, y)
+    @cached_property
+    def displacement(self) -> Projected:
+        return Projected(
+            x=self.se_bound.x - self.nw_bound.x,
+            y=self.se_bound.y - self.nw_bound.y,
+        )
 
 
 @dataclass
 class StructIterableCoords:
     geographic: Geographic = field(repr=False)
-    metric: Metric = field(repr=False)
+    projected: Projected = field(repr=False)
     tiles: Tiles = field(repr=False)
 
     @classmethod
     def from_geographic(cls, geographic: Geographic) -> 'StructIterableCoords':
         return StructIterableCoords(
             geographic,
-            Metric.from_geographic(geographic),
+            Projected.from_geographic(geographic),
             Tiles.from_geographic(geographic)
         )
 
     @classmethod
-    def from_metric(cls, metric: Metric) -> 'StructIterableCoords':
-        geographic = Geographic.from_metric(metric)
+    def from_projected(cls, projected: Projected) -> 'StructIterableCoords':
+        geographic = Geographic.from_projected(projected)
         return StructIterableCoords(
             geographic,
-            metric,
+            projected,
             Tiles.from_geographic(geographic)
         )
 
     @classmethod
     def from_tiles(cls, tiles: Tiles) -> 'StructIterableCoords':
         geographic = tiles.to_geographic()
-        metric = Metric.from_geographic(geographic)
+        projected = Projected.from_geographic(geographic)
         return StructIterableCoords(
             geographic,
-            metric,
+            projected,
             tiles
         )
 
@@ -151,321 +159,193 @@ class StructIterableCoords:
 
 
 class Distance(abc.ABC):
-    def __init__(
-            self,
-            cameras: StructIterableCoords | tuple,
-            headings: Collection[float] | float,
-            images: str | Path,
-            poid: Collection[str] | str,
-            **kwargs
-    ):
-        if isinstance(cameras, (tuple, list)):
-            geographic = Geographic(x=[cameras[0]], y=[cameras[1]])
-            self.camera = StructIterableCoords.from_geographic(geographic)
-        elif isinstance(cameras, StructIterableCoords):
-            self.camera = cameras
-        else:
-            raise TypeError(cameras)
+    _camera: StructIterableCoords
+    _heading: Collection[float]
+    _image: Iterable[np.array]
+    _poid: Iterable[str]
+    _index: pd.MultiIndex
+    _projection: Any
 
-        if isinstance(headings, float):
-            self.heading = (headings,)
-        elif isinstance(headings, Collection):
-            self.heading = headings
-        else:
-            raise TypeError(headings)
-
-        if isinstance(images, (str, Path)):
-            self.image = images
-        elif isinstance(images, Collection):
-            self.image = images
-        else:
-            raise TypeError(images)
-
-        if isinstance(poid, (str)):
-            self.poid = (poid,)
-        elif isinstance(poid, Collection):
-            self.poid = poid
-        else:
-            raise TypeError(poid)
-
-    @functools.cached_property
+    @cached_property
     def _northwest(self) -> StructIterableCoords:
-        return StructIterableCoords.from_tiles(self.camera.tiles)
+        return StructIterableCoords.from_tiles(self._camera.tiles)
 
-    @functools.cached_property
-    def _displacement(self) -> list[tuple[float, float]]:
+    @cached_property
+    def _displacement(self) -> DataFrame:
+        # TODO: implement displacement in Cython
         def displacement() -> Iterator[tuple[float, float]]:
-            for camera, tile_displacement, heading, image, northwest_bound, tile in zip(
-                    self.camera.metric,
-                    self.camera.tiles.displacement,
-                    self.heading,
-                    self.image,
-                    self._northwest.metric,
-                    self.camera.tiles
+            for camera, tile_displacement, heading, image, northwest, tile, poid in zip(
+                    self._camera.projected,
+                    self._camera.tiles.displacement,
+                    self._heading,
+                    self._image,
+                    self._northwest.projected,
+                    self._camera.tiles,
+                    self._poid
             ):
+                xlen = tile_displacement[0]
+                ylen = tile_displacement[1]
                 theta = (450 - heading) % 360
                 red = image[:, :, 0]
                 slope = math.tan(math.radians(theta))
                 buffer = 0
-                yinc = 1 if theta < 180 else -1
-                xinc = 1 if heading < 180 else -1
                 slope = abs(slope)
-                # TODO: Why aren't tiles aligned?
 
-                # epsg:3857 to pixels
-                cx = x = int(
-                    (camera[0] - northwest_bound[0])
-                    / tile_displacement[0]
-                    * 255
+                ccam = cwall = int(
+                    (camera[0] - northwest[0]) / xlen * 255
                 )
-                cy = y = int(
-                    (camera[1] - northwest_bound[1])
-                    / tile_displacement[1]
-                    * 255
+                rcam = rwall = int(
+                    (camera[1] - northwest[1]) / ylen * 255
                 )
-                if not (0 <= x <= 255) or not (0 <= y <= 255):
-                    raise RuntimeError('you did this wrong')
+                # 1 is right, -1 is left
+                cinc = 1 if heading < 180 else -1
+                # -1 is up, 1 is down
+                rinc = -1 if theta < 180 else 1
 
-                # This is for before I try it in Cython. We can use pythonic object assignment to compress this code,
-                #   but that would cost us speed which actually matters here
                 if slope > 1:
-                    # buffer stores x
+                    # r >> c
                     slope = 1 / slope
-                    match xinc, yinc:
-                        case 1, 1:
-                            while x <= 255 and y <= 255:
-                                if red[x, y]:
-                                    break
-                                elif buffer >= 1:
-                                    buffer -= 1
-                                    x += 1
-                                else:
-                                    buffer += slope
-                                    y += 1
-                            else:
-                                yield None, None
-                                continue
-                        case 1, -1:
-                            while x <= 255 and y >= 0:
-                                if red[x, y]:
-                                    break
-                                elif buffer >= 1:
-                                    buffer -= 1
-                                    x += 1
-                                else:
-                                    buffer += slope
-                                    y -= 1
-                            else:
-                                yield None, None
-                                continue
-                        case -1, 1:
-                            while x >= 0 and y <= 255:
-                                if red[x, y]:
-                                    break
-                                elif buffer >= 1:
-                                    buffer -= 1
-                                    x -= 1
-                                else:
-                                    buffer += slope
-                                    y += 1
-                            else:
-                                yield None, None
-                                continue
-                        case -1, -1:
-                            while x >= 0 and y >= 0:
-                                if red[x, y]:
-                                    break
-                                elif buffer >= 1:
-                                    buffer -= 1
-                                    x -= 1
-                                else:
-                                    buffer += slope
-                                    y -= 1
-                            else:
-                                yield None, None
-                                continue
-
+                    while 0 <= cwall <= 255 and 0 <= rwall <= 255:
+                        if red[rwall, cwall]:
+                            y = (rwall - rcam) / 255 * ylen
+                            x = (cwall - ccam) / 255 * xlen
+                            yield x, y
+                            break
+                        elif buffer >= 1:
+                            buffer += -1
+                            cwall += cinc
+                        else:
+                            buffer += slope
+                            rwall += rinc
+                    else:
+                        yield np.nan, np.nan
                 else:
-                    # buffer stores y
-                    match xinc, yinc:
-                        case 1, 1:
-                            while x <= 255 and y <= 255:
-                                if red[x, y]:
-                                    break
-                                elif buffer >= 1:
-                                    buffer -= 1
-                                    y += 1
-                                else:
-                                    buffer += slope
-                                    x += 1
-                            else:
-                                yield None, None
-                                continue
-                        case 1, -1:
-                            while x <= 255 and y >= 0:
-                                if red[x, y]:
-                                    break
-                                elif buffer >= 1:
-                                    buffer -= 1
-                                    y -= 1
-                                else:
-                                    buffer += slope
-                                    x += 1
-                            else:
-                                yield None, None
-                                continue
-                        case -1, 1:
-                            while x >= 0 and y <= 255:
-                                if red[x, y]:
-                                    break
-                                elif buffer >= 1:
-                                    buffer -= 1
-                                    y -= 1
-                                else:
-                                    buffer = + slope
-                                    x -= 1
-                            else:
-                                yield None, None
-                                continue
-                        case -1, -1:
-                            while x >= 0 and y >= 0:
-                                if red[x, y]:
-                                    break
-                                elif buffer >= 1:
-                                    buffer -= 1
-                                    y -= 1
-                                else:
-                                    buffer = + slope
-                                    x -= 1
-                            else:
-                                yield None, None
-                                continue
+                    # c >> r
+                    while 0 <= cwall <= 255 and 0 <= rwall <= 255:
+                        if red[rwall, cwall]:
+                            y = (rwall - rcam) / 255 * ylen
+                            x = (cwall - ccam) / 255 * xlen
+                            yield x, y
+                            break
+                        elif buffer >= 1:
+                            buffer += -1
+                            rwall += rinc
+                        else:
+                            buffer += slope
+                            cwall += cinc
+                    else:
+                        yield np.nan, np.nan
 
-                # pixels to displacement
-                x = (x / 255 * tile_displacement[0])
-                y = (y / 255 * tile_displacement[1])
-                yield x, y
+        return DataFrame(displacement(), columns=['x', 'y'], index=self._index)
 
-        return list(displacement())
+    # TODO: small presentation on oak ridge building data
 
-    @functools.cached_property
-    def _distance(self) -> list[Optional[float]]:
-        return [
-            math.sqrt(x ** 2 + y ** 2)
-            if x is not None
-            else None
-            for x, y in self._displacement
-        ]
+    @property
+    def _distance(self) -> pd.Series:
+        # wall has na
+        wall = self._wall
+        camera = self._camera.geographic
 
-    @functools.cached_property
-    def _wall(self) -> StructIterableCoords:
+        wall = wall.geoseries.to_crs(4326)
+        # camera = camera.geoseries.to_crs(4326)
+
+        index = wall.index.intersection(camera.index)
+        wall = wall.loc[index]
+        camera = camera.loc[index]
+
+        wall_tuples = zip(wall.y, wall.x)
+        camera_tuples = zip(camera.y, camera.x)
+        distance = Series((
+            geopy.distance.distance(w, c).meters
+            for w, c in zip(wall_tuples, camera_tuples)
+        ), dtype='Float64', index=index)
+
+        return distance
+
+        # loc = wall.x.notna()
+        # index = self._index[loc]
+        # camera: DataFrame = camera.loc[loc]
+        # wall: DataFrame = wall.loc[loc]
+        #
+        #
+        # y, x = trans.transform(wall.y, wall.x)
+        # wall_tuples = zip(y, x)
+        # camera_tuples = zip(camera.y, camera.x)
+        #
+        # distance = Series((
+        #     geopy.distance.distance(w, c).meters
+        #     for w, c in zip(wall_tuples, camera_tuples)
+        # ), dtype='Float64', index=index)
+        # return distance
+
+    @cached_property
+    def _wall(self) -> Projected:
         displacement = self._displacement
-        metric = self.camera.metric
-        x = [
-            m[0] + d[0]
-            if d is not None
-            else None
-            for d, m in zip(displacement, metric)
-        ]
-        y = [
-            m[1] + d[1]
-            if d is not None
-            else None
-            for d, m in zip(displacement, metric)
-        ]
-        metric = Metric(x, y)
-        return StructIterableCoords(
-            geographic=Geographic.from_metric(metric),
-            metric=metric,
-            tiles=self.camera.tiles
+        return Projected(
+            x=displacement['x'] + self._camera.projected.x,
+            y=displacement['y'] + self._camera.projected.y,
+            crs=3857,
+            index=self._index
         )
 
-    @functools.cached_property
+    @cached_property
     def distance(self) -> GeoDataFrame:
-        poid = Series(self.poid, dtype='string')
-        # Just for human friendly sub-indexing
-        heading = Series((
-            int(heading)
-            for heading in self.heading
-        ), dtype='int8')
-        wall = GeoSeries((
-            shapely.geometry.Point(g[0], g[1])
-            if g is not None
-            else None
-            for g in self._wall.geographic
-        ))
-        camera = GeoSeries((
-            shapely.geometry.Point(g[0], g[1])
-            if g is not None
-            else None
-            for g in self.camera.geographic
-        ))
-        distance = Series(self._distance, dtype='Float64')
-
+        tile = pd.Series(iter(self._camera.tiles), index=self._index)
         return GeoDataFrame({
-            'poid': poid,
-            'heading': heading,
-            'camera': camera,
-            'wall': wall,
-            'distance': distance,
-        }, index=['poid', 'heading'])
+            'distance': self._distance,
+            'camera': self._camera.geographic.geoseries,
+            'wall': self._wall.geoseries,
+            'tile': tile,
+        })
 
     @functools.cached_property
     def plots(self) -> DataFrame:
-        nw = self._northwest.metric
-        camera = self.camera.metric
-        wall = self._wall.metric
-        displacement = self.camera.tiles.displacement
-        index = self.poid
-        image = self.image
+        xlens = self._camera.tiles.displacement.x
+        ylens = self._camera.tiles.displacement.y
+        displacement = self._displacement
+        northwest = self._northwest.projected
         distance = self.distance
+        camera = self._camera.projected
 
-        cx = [
-            int(
-                (cx - nwx) / d[0] * 255
-            )
-            for nwx, cx, d in zip(nw.x, camera.x, displacement)
-        ]
-        cy = [
-            int(
-                (cy - ny) / d[1] * 255
-            )
-            for ny, cy, d in zip(nw.y, camera.y, displacement)
-        ]
-        wx = [
-            int(
-                (wx - nwx) / d[0] * 255
-            )
-            if wx is not None
-            else None
-            for nwx, wx, d in zip(nw.x, wall.x, displacement)
-        ]
-        wy = [
-            int(
-                (wy - ny) / d[1] * 255
-            )
-            if wy is not None
-            else None
-            for ny, wy, d in zip(nw.y, wall.y, displacement)
-        ]
-        return DataFrame({
-            'cx': cx,
-            'cy': cy,
-            'wx': wx,
-            'wy': wy,
-            'image': image,
-            'distance': distance
-        }, index=index)
+        colcams: Series = camera.x - northwest.x
+        colcams /= xlens * 255
+        colcams = colcams.astype('uint16')
 
-    def plot(self, poid: str):
-        fig: matplotlib.pyplot.Figure
-        ax: matplotlib.pyplot.Axes
-        fig, ax = plt.subplots(1, 1)
-        cx, cy, wx, wy, image, distance = self.plots.loc[poid].values
-        ax.imshow(skimage.io.imread(image))
-        ax.set_title(f'{distance=}')
-        ax.plot(cy, cx, 'wo')
-        ax.plot(wy, wx, 'wo')
+        rowcams: Series = camera.y - northwest.y
+        rowcams /= ylens * 255
+        rowcams = rowcams.astype('uint16')
+
+        colwalls: Series = displacement['x'] / xlens * 255
+        colwalls = colwalls.astype('uint16')
+        colwalls += colcams
+
+        rowwalls: Series = displacement['y'] / ylens * 255
+        rowwalls = rowwalls.astype('uint16')
+        rowwalls += rowcams
+
+        distance = distance.assign(
+            colcam=colcams,
+            rowcam=rowcams,
+            colwall=colwalls,
+            rowwall=rowwalls,
+        )
+        return distance
+
+    def plot(self, poid: str, heading: int):
+        fig, ax = plt.subplots()
+        series = self.plots.loc[poid, heading]
+        image = self._image[series['tile']]
+        ax.imshow(image)
+        ax.plot(*series[['colcam', 'rowcam']], 'wo')
+        ax.plot(*series[['colwall', 'rowwall']], 'wo')
+        distance = series['distance']
+        if pd.notna(distance):
+            ax.set_title(f'{distance=:.1f}')
+        camera = series['camera']
+        print(f'Camera: {camera.y, camera.x}')
+        wall = series['wall']
+        if wall is not None:
+            print(f'Wall: {wall.y, wall.x}')
 
     def load_distance(self, path: Path | str):
         path = Path(path)
@@ -484,15 +364,46 @@ class Distance(abc.ABC):
         # TODO: Save each image to a file
 
 
-class BatchDistance(Distance):
-    """
-    Caveat: Every streetview has one taken from left side, and one taken from right side.
-        For each camera
-            in each iterator
-            yield twice
-    """
+class DescriptorImages:
+    def __get__(self, instance: 'BatchDistance', owner: Type['BatchDistance']):
+        self.instance = instance
+        self.owner = owner
+        return self
 
-    def __init__(self, path_inputs: str, path_metadata: str, path_images: str, **kwargs):
+    def __getitem__(self, item: tuple[float, float]):
+        x, y = item
+        path_images = self.instance.path_images
+        if path_images.is_dir():
+            path = path_images / f"19_{y}_{x}_pred.png"
+            image = skimage.io.imread(path)
+        elif path_images.name.endswith('.zip'):
+            with ZipFile(path_images) as zf:
+                path = f'best_images/19_{y}_{x}_pred.png'
+                with zf.open(path) as f:
+                    image = skimage.io.imread(f)
+        return image
+
+    def __iter__(self):
+        path_images = self.instance.path_images
+        tiles = self.instance._camera.tiles
+        if path_images.is_dir():
+            for x, y in tiles:
+                path = path_images / f'19_{y}_{x}_pred.png'
+                yield skimage.io.imread(path)
+        elif path_images.name.endswith('.zip'):
+            with ZipFile(path_images) as zf:
+                for x, y in tiles:
+                    directory = f'best_images/19_{y}_{x}_pred.png'
+                    with zf.open(directory) as f:
+                        yield skimage.io.imread(f)
+        else:
+            raise ValueError(path_images)
+
+
+class BatchDistance(Distance):
+    _image = DescriptorImages()
+
+    def __init__(self, path_inputs: str, path_metadata: str, path_images: str):
         """
 
         :param path_inputs:
@@ -504,6 +415,7 @@ class BatchDistance(Distance):
         :param path_images:
             zip, directory
         """
+        self.path_images = Path(path_images)
 
         with open(path_inputs) as f:
             rows = np.fromiter((
@@ -520,7 +432,7 @@ class BatchDistance(Distance):
             for i, char in enumerate(rows)
             if char != 'E'
         ))
-        path_inputs = pd.read_csv(
+        inputs = pd.read_csv(
             path_inputs,
             skiprows=skiprows,
             usecols=[1, 2, 3],
@@ -531,7 +443,7 @@ class BatchDistance(Distance):
                 'lon': 'Float64',
             },
         )
-        path_metadata = pd.read_csv(
+        metadata = pd.read_csv(
             path_metadata,
             skiprows=skiprows,
             usecols=[2],
@@ -541,96 +453,47 @@ class BatchDistance(Distance):
 
             },
         )
-        resource = pd.concat((path_metadata, path_inputs), axis=1)
+        resource = pd.concat((metadata, inputs), axis=1)
         resource['line'] = pd.Series(iter(line), dtype='int16')
-        resource = resource.set_index('poid', drop=False)
+        # resource = resource.set_index('poid', drop=False)
         loc = resource['heading'].isna()
         if any(loc):
             warnings.warn('some headers in the file have heading=nan')
             resource = resource[~loc]
 
-        def poid() -> Iterator[str]:
-            for poid in resource['poid']:
-                yield poid
-                yield poid
-
-        def heading() -> Iterator[float]:
+        def headings():
             for heading in resource['heading']:
-                yield (heading + 45) % 360
-                heading -= 45
+                yield (heading + 90) % 360
+                heading += -90
                 if heading < 0:
                     heading += 360
                 yield heading
 
-        def camera() -> StructIterableCoords:
-            def lon():
-                for x in resource['lon']:
-                    yield x
-                    yield x
+        source = DataFrame({
+            'poid': resource['poid'].repeat(2).reset_index(drop=True),
+            'heading': Series(headings(), dtype='Float64'),
+            'lon': resource['lon'].repeat(2).reset_index(drop=True),
+            'lat': resource['lat'].repeat(2).reset_index(drop=True),
+        })
+        # It is possible for the resource to have implicated duplicate headings at a particular location
+        index = pd.MultiIndex.from_tuples(zip(
+            source['poid'],
+            source['heading'].round(0).astype('uint16')
+        ), names=['poid', 'heading'])
+        loc = ~index.duplicated()
+        source = source.loc[loc]
+        index = index[loc]
+        source.index = index
 
-            def lat():
-                for y in resource['lat']:
-                    yield y
-                    yield y
+        self._index = index
+        self._source = source
+        self._poid = source['poid']
+        self._heading = source['heading']
 
-            geographic = Geographic(x=list(lon()), y=list(lat()))
-            metric = Metric.from_geographic(geographic)
-            tiles = Tiles.from_geographic(geographic)
-            return StructIterableCoords(geographic, metric, tiles)
-
-        super(BatchDistance, self).__init__(
-            cameras=camera(),
-            headings=list(heading()),
-            images=path_images,
-            poid=list(poid()),
-            **kwargs
-        )
-
-    class DescriptorImages:
-        directory: str | Path
-
-        def __get__(self, instance: 'BatchDistance', owner: Type['BatchDistance']):
-            self.instance = instance
-            self.owner = owner
-            return self
-
-        def __set__(self, instance, value):
-            self.instance = instance
-            self.directory = Path(value)
-
-        def __getitem__(self, tile: tuple[float, float]):
-            x, y = tile
-            directory = self.directory
-            if directory.is_dir():
-                path = directory / f"19_{y}_{x}_pred.png"
-                image = skimage.io.imread(path)
-            elif directory.name.endswith('.zip'):
-                with ZipFile(directory) as zf:
-                    path = f'best_images/19_{y}_{x}_pred.png'
-                    with zf.open(path) as f:
-                        image = skimage.io.imread(f)
-            return image
-
-        def __iter__(self):
-            directory = self.directory
-            if directory.is_dir():
-                for x, y in self.instance.camera.tiles:
-                    path = directory / f"19_{y}_{x}_pred.png"
-                    image = skimage.io.imread(path)
-                    yield image
-                    yield image
-            elif directory.name.endswith('.zip'):
-                with ZipFile(directory) as zf:
-                    for x, y in self.instance.camera.tiles:
-                        directory = f'best_images/19_{y}_{x}_pred.png'
-                        with zf.open(directory) as f:
-                            image = skimage.io.imread(f)
-                            yield image
-                            yield image
-            else:
-                raise ValueError(directory)
-
-    image = DescriptorImages()
+        geographic = Geographic(x=self._source['lon'], y=self._source['lat'])
+        projected = Projected.from_geographic(geographic)
+        tiles = Tiles.from_geographic(geographic)
+        self._camera = StructIterableCoords(geographic, projected, tiles)
 
 
 if __name__ == '__main__':
@@ -639,9 +502,6 @@ if __name__ == '__main__':
         path_metadata='/home/arstneio/PycharmProjects/ValidateOSM/streetview_batch/static/input/manhattan.csv',
         path_images='/home/arstneio/PycharmProjects/ValidateOSM/streetview_batch/static/bird.zip'
     )
+
     batch.distance
-    batch.plots
     print()
-    # distance = batch.distance
-    # print()
-    # plots = batch.plots
