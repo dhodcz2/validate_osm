@@ -49,6 +49,7 @@ pyspark
 python_dateutil
 python_log_indenter
 python_snappy
+pyarrow
 requests
 s3fs
 setuptools
