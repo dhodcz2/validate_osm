@@ -8,16 +8,7 @@ with open('requirements.txt') as f:
 install_requires = [
     line.replace('\n', '')
     for line in lines
-    if not line.startswith('-e')
 ]
-install_requires.append('pnnl-buildingid @ https://github.com/pnnl/buildingid-py.git#egg=pnnl-buildingid')
-# install_requires.append('pnnl-buildingid')
-dependency_links = [
-    line.split(' ')[1].replace('\n', '')
-    for line in lines
-    if line.startswith('-e')
-]
-
 setup(
     name='validate_osm',
     description='extracting, comparing, and validating information from OSM',
@@ -26,5 +17,4 @@ setup(
     packages=find_packages(),
     python_requires='>=3.10',
     install_requires=install_requires,
-    dependency_links=dependency_links
 )
