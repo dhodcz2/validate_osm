@@ -1,4 +1,3 @@
-git+https://github.com/pnnl/buildingid-py.git#egg=pnnl-buildingid
 Cython
 OSMPythonTools
 Pillow
