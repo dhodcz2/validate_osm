@@ -6,7 +6,6 @@ from typing import Union, Type, Any, Iterable
 from weakref import WeakKeyDictionary
 
 import geopandas as gpd
-import jsonpath_ng.ext.parser
 import numpy as np
 import pandas as pd
 from geopandas import GeoDataFrame
@@ -17,6 +16,7 @@ from validate_osm.util import concat
 
 if False | False:
     from validate_osm.compare import Compare
+
 
 @dataclasses.dataclass
 class StructData:
@@ -68,7 +68,6 @@ class DescriptorData:
                 self.load()
 
         return self.__get__(instance, owner)
-
 
         # path = self.path
         # if path.exists() and not self.redo:
@@ -122,7 +121,6 @@ class DescriptorData:
             with logged_subprocess(f'serializing {self.compare.name}.data'):
                 data.to_feather(path)
 
-
     def __hash__(self):
         return hash(self.compare)
 
@@ -165,4 +163,3 @@ class DescriptorData:
             if string in self.compare.redo:
                 return True
         return False
-

@@ -1,5 +1,6 @@
 import math
 
+
 def deg2num(lon_deg, lat_deg, zoom):
     lat_rad = math.radians(lat_deg)
     n = 2.0 ** zoom
@@ -14,4 +15,3 @@ def num2deg(xtile, ytile, zoom):
     lat_rad = math.atan(math.sinh(math.pi * (1 - 2 * ytile / n)))
     lat_deg = math.degrees(lat_rad)
     return (lon_deg, lat_deg)
-
