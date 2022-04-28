@@ -11,7 +11,7 @@ install_requires = [
     line.replace('\n', '')
     for line in lines
 ]
-install_requires.append('pnnl-buildingid @ https://github.com/pnnl/buildingid-py')
+install_requires.append('pnnl-buildingid @ https://github.com/pnnl/buildingid-py.git')
 setup(
     name='validate_osm',
     description='extracting, comparing, and validating information from OSM',
