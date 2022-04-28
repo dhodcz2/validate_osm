@@ -10,6 +10,7 @@ install_requires = [
     for line in lines
     if not line.startswith('-e')
 ]
+install_requires.append('buildingid-py')
 dependency_links = [
     line.split(' ')[1].replace('\n', '')
     for line in lines
