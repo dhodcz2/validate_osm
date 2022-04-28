@@ -27,6 +27,7 @@ from validate_building_height.new_york import (
 # TODO: Perhaps implement scheduling such that OSM downloads are made when there is minimal system load.
 
 CompareChicago: Type[Compare] = partial(Compare, chicago, MSBF, OCM, OSM, verbose=True)
+CompareUIC: Type[Compare] = partial(Compare, uic, MSBF, OCM, OSM, verbose=True)
 # CompareChampaign: Type[Compare] = partial(Compare, champaign, MSBF, MSBF2017, OCM, OSM, verbose=True)
 CompareChampaign: Type[Compare] = partial(Compare, champaign, MSBF, MSBF2017, OCM, OSM, verbose=True)
 CompareRio: Type[Compare] = partial(Compare, rio, MSBF, MSBF2017, OSM, verbose=True)
