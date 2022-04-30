@@ -1,3 +1,8 @@
+import concurrent.futures
+import multiprocessing
+from multiprocessing import cpu_count
+# from multiprocessing import Pool
+import concurrent
 import abc
 import functools
 import itertools
@@ -7,8 +12,8 @@ import warnings
 from dataclasses import field, dataclass
 from functools import cached_property
 from pathlib import Path
-from typing import Collection, Type, Any
 from typing import Iterator, Iterable
+from typing import Type, Any
 from zipfile import ZipFile
 
 import geopy.distance
@@ -16,18 +21,22 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pyproj
+import pyximport
 import skimage.io
 from geopandas import GeoDataFrame, GeoSeries
 from pandas import DataFrame
 from pandas import Series
 
+pyximport.install(
+    setup_args={
+        'include_dirs': np.get_include(),
+    },
+    reload_support=True
+)
+import streetview_height.cdistance
+
 # TODO: Is Projected entirely pointless?
-from streetview_batch.slippy import deg2num, num2deg
-
-
-# import pyximport
-# pyximport.install()
-# from streetview_batch.cdistance import cdistance
+from streetview_height.slippy import num2deg, deg2num
 
 
 class Points(DataFrame):
@@ -160,7 +169,7 @@ class StructIterableCoords:
 
 class Distance(abc.ABC):
     _camera: StructIterableCoords
-    _heading: Collection[float]
+    _heading: Series
     _image: Iterable[np.array]
     _poid: Iterable[str]
     _index: pd.MultiIndex
@@ -202,6 +211,8 @@ class Distance(abc.ABC):
                 # -1 is up, 1 is down
                 rinc = -1 if theta < 180 else 1
 
+                # Needed: xlen, ylen, image, slope, rcam, ccam, rinc, cinc
+
                 if slope > 1:
                     # r >> c
                     slope = 1 / slope
@@ -209,6 +220,16 @@ class Distance(abc.ABC):
                         if red[rwall, cwall]:
                             y = (rwall - rcam) / 255 * ylen
                             x = (cwall - ccam) / 255 * xlen
+                            cp = streetview_height.cdistance.cdisplacement(
+                                image,
+                                xlen,
+                                ylen,
+                                slope,
+                                rcam,
+                                ccam,
+                                rinc,
+                                cinc,
+                            )
                             yield x, y
                             break
                         elif buffer >= 1:
@@ -225,6 +246,16 @@ class Distance(abc.ABC):
                         if red[rwall, cwall]:
                             y = (rwall - rcam) / 255 * ylen
                             x = (cwall - ccam) / 255 * xlen
+                            cp = streetview_height.cdistance.cdisplacement(
+                                image,
+                                xlen,
+                                ylen,
+                                slope,
+                                rcam,
+                                ccam,
+                                rinc,
+                                cinc,
+                            )
                             yield x, y
                             break
                         elif buffer >= 1:
@@ -237,6 +268,57 @@ class Distance(abc.ABC):
                         yield np.nan, np.nan
 
         return DataFrame(displacement(), columns=['x', 'y'], index=self._index)
+
+    @cached_property
+    def _cdisplacement(self) -> GeoDataFrame:
+        # We call to iter(images) firstly which takes advantage of the preemptive multiprocessing
+        images = iter(self._image)
+        camera = self._camera
+        northwest = self._northwest.projected
+        heading = self._heading
+
+        ccams: Series = camera.projected.x - northwest.x
+        ccams /= camera.tiles.displacement.x
+        ccams *= 255
+        ccams = ccams.astype('uint16')
+
+        rcams: Series = camera.projected.y - northwest.y
+        rcams /= camera.tiles.displacement.y
+        rcams *= 255
+        rcams = rcams.astype('uint16')
+
+        theta: Series = (450 - heading) % 360
+        # slopes = np.tan(np.radians(theta))
+        slopes = np.abs(np.tan(np.radians(theta)))
+
+
+        # 1 is right, -1 is lfet
+        cincs = (
+            1 if b else -1
+            for b in (heading <= 180)
+        )
+        # -1 is up, 1 is down
+        rincs = (
+            -1 if b else 1
+            for b in (theta <= 180)
+        )
+
+        def gen():
+            for image, xlen, ylen, slope, rcam, ccam, rinc, cinc in zip(
+                    images,
+                    self._camera.tiles.displacement.x,
+                    self._camera.tiles.displacement.y,
+                    slopes,
+                    rcams,
+                    ccams,
+                    rincs,
+                    cincs
+            ):
+                yield streetview_height.cdistance.cdisplacement(image, xlen, ylen, slope, rcam, ccam, rinc, cinc)
+
+        # TODO: blackpill is that one of the iterators has a different length
+        return DataFrame(gen(), columns=['x', 'y'], index=self._index)
+        # Needed: xlen, ylen, image, slope, rcam, ccam, rinc, cinc
 
     # TODO: small presentation on oak ridge building data
 
@@ -261,22 +343,6 @@ class Distance(abc.ABC):
         ), dtype='Float64', index=index)
 
         return distance
-
-        # loc = wall.x.notna()
-        # index = self._index[loc]
-        # camera: DataFrame = camera.loc[loc]
-        # wall: DataFrame = wall.loc[loc]
-        #
-        #
-        # y, x = trans.transform(wall.y, wall.x)
-        # wall_tuples = zip(y, x)
-        # camera_tuples = zip(camera.y, camera.x)
-        #
-        # distance = Series((
-        #     geopy.distance.distance(w, c).meters
-        #     for w, c in zip(wall_tuples, camera_tuples)
-        # ), dtype='Float64', index=index)
-        # return distance
 
     @cached_property
     def _wall(self) -> Projected:
@@ -373,31 +439,64 @@ class DescriptorImages:
     def __getitem__(self, item: tuple[float, float]):
         x, y = item
         path_images = self.instance.path_images
-        if path_images.is_dir():
-            path = path_images / f"19_{y}_{x}_pred.png"
-            image = skimage.io.imread(path)
-        elif path_images.name.endswith('.zip'):
-            with ZipFile(path_images) as zf:
-                path = f'best_images/19_{y}_{x}_pred.png'
-                with zf.open(path) as f:
-                    image = skimage.io.imread(f)
-        return image
+        path = path_images / f"19_{y}_{x}_pred.png"
+        return skimage.io.imread(path)
 
-    def __iter__(self):
+    @property
+    def _paths(self):
         path_images = self.instance.path_images
         tiles = self.instance._camera.tiles
-        if path_images.is_dir():
-            for x, y in tiles:
-                path = path_images / f'19_{y}_{x}_pred.png'
-                yield skimage.io.imread(path)
-        elif path_images.name.endswith('.zip'):
-            with ZipFile(path_images) as zf:
-                for x, y in tiles:
-                    directory = f'best_images/19_{y}_{x}_pred.png'
-                    with zf.open(directory) as f:
-                        yield skimage.io.imread(f)
-        else:
-            raise ValueError(path_images)
+        paths = (
+            f'{path_images}/19_{y}_{x}_pred.png'
+            for x, y in tiles
+        )
+        yield from paths
+
+    def __iter__(self):
+        cpus = multiprocessing.cpu_count()
+        paths = iter(self._paths)
+
+        def gen() -> Iterator[Iterator[str]]:
+            while True:
+                batch = (
+                    path for _, path in zip(range(10000), paths)
+                )
+                try:
+                    peak = next(batch)
+                except StopIteration:
+                    return
+                else:
+                    yield itertools.chain((peak,), batch)
+
+        pool = multiprocessing.Pool(cpus)
+        batches = iter(gen())
+        past = pool.map_async(skimage.io.imread, next(batches))
+        for batch in gen():
+            future = pool.map_async(skimage.io.imread, batch)
+            yield from past.get()
+            past = future
+        yield from past.get()
+
+    def _passive(self):
+        cpus = multiprocessing.cpu_count() - 1
+        paths = self._paths
+
+        def batches():
+            while True:
+                try:
+                    path = next(paths)
+                except StopIteration:
+                    return
+                others = (batch for batch, _ in zip(paths, range(5000)))
+                yield path, *others
+
+        # TODO: Instead of reading in response, read proactively
+        # with concurrent.futures.ProcessPoolExecutor(max_workers=cpus + 1) as pool:
+        #     for batch in batches():
+        #         yield from pool.map(skimage.io.imread, batch)
+        pool = multiprocessing.Pool(cpus + 1)
+        for batch in batches():
+            yield from pool.map(skimage.io.imread, batch)
 
 
 class BatchDistance(Distance):
@@ -498,10 +597,11 @@ class BatchDistance(Distance):
 
 if __name__ == '__main__':
     batch = BatchDistance(
-        path_inputs='/home/arstneio/PycharmProjects/ValidateOSM/streetview_batch/static/camera/manhattan_gsv.csv',
-        path_metadata='/home/arstneio/PycharmProjects/ValidateOSM/streetview_batch/static/input/manhattan.csv',
-        path_images='/home/arstneio/PycharmProjects/ValidateOSM/streetview_batch/static/bird.zip'
+        path_inputs='/home/arstneio/PycharmProjects/ValidateOSM/streetview_height/static/camera/manhattan_gsv.csv',
+        path_metadata='/home/arstneio/PycharmProjects/ValidateOSM/streetview_height/static/input/manhattan.csv',
+        path_images='/home/arstneio/PycharmProjects/ValidateOSM/streetview_height/static/best_images'
     )
-
-    batch.distance
+    # batch._cdisplacement
+    # batch._displacement
+    batch._displacement
     print()
