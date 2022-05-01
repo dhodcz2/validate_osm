@@ -1,7 +1,7 @@
 from pathlib import Path
 import numpy
-from Cython.Build import cythonize
-from setuptools import Extension
+# from Cython.Build import cythonize
+# from setuptools import Extension
 from setuptools import find_packages
 from setuptools import setup
 
@@ -26,6 +26,6 @@ setup(
     packages=find_packages(),
     python_requires='>=3.10',
     install_requires=install_requires,
-    ext_modules=cythonize('streetview_height/cdistance.pyx'),
+    # ext_modules=cythonize('streetview_height/cdistance.pyx'),
     include_dirs=[numpy.get_include()]
 )
