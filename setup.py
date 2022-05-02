@@ -1,3 +1,4 @@
+import warnings
 from pathlib import Path
 import numpy
 # from Cython.Build import cythonize
@@ -9,6 +10,8 @@ path = Path(__file__).parent
 with open(path / 'requirements.txt') as f:
     lines = f.readlines()
     # install_requires = f.read()
+
+warnings.warn("install gdal to your system. apparently it rambles about needing gdal-config or something, idk")
 
 # git+https://github.com/pnnl/buildingid-py
 # git+https://github.com/pnnl/buildingid-py.git#egg=pnnl-buildingid
