@@ -1,6 +1,7 @@
+from pandas import IndexSlice as idx
+import time
 import geopandas as gpd
 import itertools
-from shadow.util import load_grid
 import math
 import os
 
@@ -16,12 +17,31 @@ from pandas import Series, DataFrame
 from pyproj import Transformer
 from shapely.geometry import box
 from tqdm.notebook import trange
-from shadow.util import load_grid, num2deg, deg2num
 
+# from shadow.util import load_grid, num2deg, deg2num
 transformer = Transformer.from_crs(3395, 4326)
 invtransformer = Transformer.from_crs(4326, 3395)
+from shadow.util import (
+    nums2degs, degs2nums, load_grid
+)
 
 from tqdm.notebook import trange
+
+
+def deg2num(lon_deg, lat_deg, zoom):
+    lat_rad = math.radians(lat_deg)
+    n = 2.0 ** zoom
+    xtile = int((lon_deg + 180.0) / 360.0 * n)
+    ytile = int((1.0 - math.asinh(math.tan(lat_rad)) / math.pi) / 2.0 * n)
+    return (xtile, ytile)
+
+
+def num2deg(xtile, ytile, zoom):
+    n = 2.0 ** zoom
+    lon_deg = xtile / n * 360.0 - 180.0
+    lat_rad = math.atan(math.sinh(math.pi * (1 - 2 * ytile / n)))
+    lat_deg = math.degrees(lat_rad)
+    return (lon_deg, lat_deg)
 
 
 def run(gdf: GeoDataFrame, zoom: int):
@@ -36,62 +56,111 @@ def run(gdf: GeoDataFrame, zoom: int):
 
     max_height = gdf.height.max()
 
-    # Get tile grid
+    # Generate Tiles
     trans = Transformer.from_crs(4326, 3395, always_xy=True)
 
-    tw = range(math.floor(bottomleft[0]), math.ceil(topright[0]))
-    ts = range(math.floor(bottomleft[1]), math.ceil(topright[1]))
-    sw = DataFrame((
-        num2deg(x, y, zoom)
-        for x, y in zip(tw, ts)
-    ), columns=['x', 'y'])
-    pw, ps = trans.transform(sw['x'], sw['y'])
+    rw = range(math.floor(bottomleft[0]), math.ceil(topright[0]))
+    rs = range(math.floor(bottomleft[1]), math.ceil(topright[1]))
+    index = pd.MultiIndex.from_product((rw, rs), names=['tw', 'ts'])
+    tw = index.get_level_values(0).values
+    ts = index.get_level_values(1).values
 
-    te = range(math.floor(bottomleft[0]) + 1, math.ceil(topright[0]) + 1)
-    tn = range(math.floor(bottomleft[1]) + 1, math.ceil(topright[1]) + 1)
-    ne = DataFrame((
-        num2deg(x, y, zoom)
-        for x, y in zip(te, tn)
-    ), columns=['x', 'y'])
-    pe, pn = trans.transform(ne['x'], ne['y'])
+    te = tw + 1
+    tn = ts + 1
 
-    # tw: tile west; ts: tile south
-    # pw: projected west; ps: projected south
+    # gw = geographic north
+    gw, gs = nums2degs(tw, ts, zoom, len(tw))
+    ge, gn = nums2degs(te, tn, zoom, len(te))
+
+    # pw = projected west
+    pw, ps = trans.transform(gw, gs)
+    pe, pn = trans.transform(ge, gn)
+
+    geometry = map(shapely.geometry.box, pw, ps, pe, pn)
     tiles = GeoDataFrame({
-        'tw': tw, 'ts': ts, 'tn': tn, 'te': te,
         'pw': pw, 'ps': ps, 'pn': pn, 'pe': pe,
+        # 'area': abs(pe - pw) * abs(pn - ps),
         'l': abs(pe - pw),
         'h': abs(pn - ps),
-        'geometry': GeoSeries((
-            shapely.geometry.box(*vals)
-            for vals in zip(pw, ps, pe, pn)
-        ))
-    }, index=['tw', 'ts'], crs=3395)
+        'geometry': geometry,
+    }, index=index, crs=3395)
+    tiles['area'] = tiles['l'] * tiles['h']
 
-    cellsize = 10
-    # TODO: group by tiles, and call create_image for each tile
+    # Query for tile, building matches
     itiles, igdf = gdf.sindex.query_bulk(tiles.geometry)
-    tiles: GeoDataFrame = tiles.iloc[itiles]
+
+    # Apply the tiles to the gdf
+    gdf = gdf.iloc[igdf]
+    tiles = tiles.iloc[itiles]
+    # TODO: Perhaps tiles aren't even necessary, and just create cells.
+    intersection: GeoSeries = tiles.intersection(gdf, align=False)
+
+    # Appropriate the transformation to the gdf
+    gdf = gdf.set_geometry(intersection)
+    gdf.index = intersection.index
+    del tiles['geometry']
+
+    # Generate cells
+    cellsize = 10
+    gridsize = cellsize ** 2
+
+    # Generate two arrays of cartesian pairs
+
+    cw = np.repeat(range(cellsize), cellsize)
+    cs = np.tile(range(cellsize), cellsize)
+
+    cw = np.tile(cw, len(tiles))
+    cs = np.repeat(cs, len(tiles))
+
+    tw = tw.repeat(gridsize)
+    ts = ts.repeat(gridsize)
+
+    index = pd.MultiIndex.from_arrays((
+        tw, ts, cw, cs
+    ), names=['tw', 'ts', 'cw', 'cs'])
+
+    ce = cw + 1
+    cn = cs + 1
+
+    l = np.repeat(tiles['l'], gridsize)
+    h = np.repeat(tiles['h'], gridsize)
+    a = l * h / gridsize
+
+    pw = np.repeat(tiles['pw'], gridsize) + (cw / l)
+    pe = np.repeat(tiles['pw'], gridsize) + (ce / l)
+    ps = np.repeat(tiles['ps'], gridsize) + (cs / h)
+    pn = np.repeat(tiles['ps'], gridsize) + (cn / h)
+
+    del tiles
+    geometry = map(shapely.geometry.box, pw, pe, ps, pn)
+
+    cells = GeoDataFrame({
+        'area': a,
+        'geometry': geometry,
+    }, index=index)
+
+    # Query for cell, building matches
+    icell, igdf = gdf.sindex.query_bulk(cells.geometry)
+
+    # Apply the cells to the gdf
     gdf: GeoDataFrame = gdf.iloc[igdf]
+    cells: GeoDataFrame = cells.iloc[icell]
 
-    intersections: GeoSeries = tiles.geometry.iloc[itiles].intersection(gdf.geometry.iloc[igdf], align=False)
-    del gdf.geometry
-    # intersection.groupby(level=['tw', 'ts'])
-    groups = intersections.groupby(level=['tw', 'ts']).groups
-    for loc, intersection in groups.items():
-        tile: Series = tiles.loc[loc]
-        grid = digital_elevation(tile, intersection, cellsize)
+    intersection = cells.intersection(gdf, align=False).area / cells['area']
+    tw = intersection.index.get_level_values('tw')
+    ts = intersection.index.get_level_values('ts')
+    height = gdf.loc[idx[tw, ts], 'height']
+    weight: Series = intersection * height
+    weights: gpd.oc = weight.groupby(level=[0, 1, 2, 3]).agg('sum')
 
-    # # intersection = gdf.intersection(tiles, align=False)
-    #
-    # tiles = tiles.assign(
-    #     geometry=intersection,
-    #     height=gdf.height
-    # )
-    # groups = tiles.groupby(['tw', 'ts'], as_index=False, sort=False, group_keys=False).groups
-    # for (tw, ts), loc in groups.items():
-    #     grid = grid_from_tile(tiles.loc[loc], 10)
-    #
+    sum = weight.groupby(level=[0, 1, 2, 3]).agg('sum')
+    groups = sum.groupby(level=['tw', 'ts'])
+    for (tw, ts), loc in groups.items():
+        tile: Series = sum.loc[loc]
+        weights = tile.values
+        cw = tile.index.get_level_values('cw')
+        cs = tile.index.get_level_values('cs')
+        grid = load_grid(cw, cs, weights, cellsize, len(tile))
 
 
 def create_image(i, j, zoom, max_height):
@@ -145,8 +214,10 @@ def digital_elevation(tile: Series, gdf: GeoDataFrame, cellsize: Series):
 
     intersection: GeoSeries = cells.intersection(gdf.geometry, align=False)
     weight: Series = intersection.area / (l * h)
-    weight.groupby(level=[])
-    # TODO:
+    group = weight.groupby(level=[0, 1]).agg('sum')
+    return load_grid(
+
+    )
 
 
 def grid_from_tile(tile: gpd.GeoDataFrame, cellsize):
@@ -193,4 +264,13 @@ def grid_from_tile(tile: gpd.GeoDataFrame, cellsize):
 
 
 if __name__ == '__main__':
+    zoom = 15
+    print('reading file...')
+    gdf = gpd.read_feather('/home/arstneio/Downloads/new_york_city.feather')
+
+    print('testing optimized...')
+    t = time.time()
+    run(gdf, zoom)
+    print(f'optimized took {(t - time.time()) / 60} minutes')
+
     ...
