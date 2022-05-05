@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 from typing import Iterable, Union
 
+import concurrent.futures
 import requests
 
 from validate_osm.logger import logger, logged_subprocess

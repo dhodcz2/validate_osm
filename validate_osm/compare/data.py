@@ -43,6 +43,7 @@ class DescriptorData:
         self.compare = None
         self.owner = None
 
+
     def __get__(self, instance: 'Compare', owner: Type['Compare']) -> Union[GeoDataFrame, 'DescriptorData']:
         if instance in self.cache:
             return self.cache[instance]
@@ -106,8 +107,8 @@ class DescriptorData:
             _ = compare.footprints
         with logged_subprocess('applying footprints'):
             data = compare.footprint(self.__get__(compare, owner))
-        if self.compare is None:
-            raise ValueError
+        # if self.compare is None:
+        #     raise ValueError
         return data
 
     def load(self):
