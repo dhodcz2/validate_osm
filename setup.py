@@ -1,4 +1,5 @@
 import warnings
+warnings.warn('you gotta install numpy before this. im too tired to resolve this issue')
 from pathlib import Path
 import numpy
 # from Cython.Build import cythonize
