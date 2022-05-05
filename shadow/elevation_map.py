@@ -102,11 +102,10 @@ def run(
     intersection: Series = cells.intersection(gdf, align=False)
 
     area: Series = intersection.area
-    max_height = gdf['height'].max()
-    weight: Series = area * 255 / cells['area'].values * gdf['height'].values / max_height
-
+    weight: Series = area / cells['area'].values * gdf['height'].values / gdf['height'].max()
     agg: Series = weight.groupby(['tn', 'tw', 'cn', 'cw']).agg('sum')
-    agg = agg.astype('uint8')
+    agg = agg * (2 ** 16 - 1) / agg.max()
+    agg = agg.astype(np.uint16)
     # TODO: Better to not use pathlib, for sake of speed?
     groups = agg.groupby(['tn', 'tw']).groups
 
@@ -126,7 +125,7 @@ def run(
         agg.loc[loc]
         for loc in groups.values()
     )
-    images = [
+    images = (
         load_image(
             cn=subagg.index.get_level_values('cn').values,
             cw=subagg.index.get_level_values('cw').values,
@@ -134,7 +133,7 @@ def run(
             cellsize=cellsize,
         )
         for subagg in subaggs
-    ]
+    )
     with ThreadPoolExecutor() as te:
         te.map(cv2.imwrite, paths, images)
 

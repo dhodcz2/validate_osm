@@ -15,16 +15,17 @@ ctypedef np.int_t INT
 if False | False:
     import math
 
+# TODO: Perhaps specify the dtype in load_image() for better/worse quality
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.nonecheck(False)
 cdef _load_image(
         np.ndarray[INT64, ndim=1] cn,
         np.ndarray[INT64, ndim=1] cw,
-        np.ndarray[UINT8, ndim=1] weights,
+        np.ndarray[UINT16, ndim=1] weights,
         unsigned char cellsize,
 ):
-    cdef np.ndarray[UINT8, ndim=2] grid = np.zeros((cellsize, cellsize), dtype=np.uint8)
+    cdef np.ndarray[UINT16, ndim=2] grid = np.zeros((cellsize, cellsize), dtype=np.uint16)
     cdef unsigned char length = len(cw)
     cdef unsigned char k
     cdef unsigned short weight
