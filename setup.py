@@ -1,3 +1,4 @@
+from Cython.Build import cythonize
 import warnings
 warnings.warn('you gotta install numpy before this. im too tired to resolve this issue')
 from pathlib import Path
@@ -31,5 +32,6 @@ setup(
     python_requires='>=3.10',
     install_requires=install_requires,
     # ext_modules=cythonize('streetview_height/cdistance.pyx'),
-    include_dirs=[numpy.get_include()]
+    include_dirs=[numpy.get_include()],
+    ext_modules=cythonize('shadow/cutil/functions.pyx')
 )
