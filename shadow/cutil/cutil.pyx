@@ -8,6 +8,8 @@ ctypedef np.uint8_t UINT8
 ctypedef np.uint16_t UINT16
 ctypedef np.float64_t F64
 ctypedef np.uint32_t UINT32
+ctypedef np.uint64_t UINT64
+ctypedef np.int64_t INT64
 ctypedef np.uint_t UINT
 ctypedef np.int_t INT
 if False | False:
@@ -17,19 +19,17 @@ if False | False:
 @cython.wraparound(False)
 @cython.nonecheck(False)
 cdef _load_image(
-        np.ndarray[UINT8, ndim=1] cn,
-        np.ndarray[UINT8, ndim=1] cw,
-        np.ndarray[F64, ndim=1] weights,
+        np.ndarray[INT64, ndim=1] cn,
+        np.ndarray[INT64, ndim=1] cw,
+        np.ndarray[UINT8, ndim=1] weights,
         unsigned char cellsize,
-        double absolute_max,
 ):
-    cdef np.ndarray[UINT, ndim=2] grid = np.zeros((cellsize, cellsize), dtype=np.uint8)
+    cdef np.ndarray[UINT8, ndim=2] grid = np.zeros((cellsize, cellsize), dtype=np.uint8)
     cdef unsigned char length = len(cw)
     cdef unsigned char k
     cdef unsigned short weight
     for k in range(length):
-        weight = <unsigned short> (255.0 * weights[k] / absolute_max)
-        grid[cn[k], cw[k]] = weight
+        grid[cn[k], cw[k]] = weights[k]
 
     return cv2.resize(grid, dsize=(256, 256))
 
@@ -38,7 +38,6 @@ def load_image(
         cw: np.ndarray,
         weights: np.ndarray,
         cellsize: int,
-        absolute_max: float
 ) -> np.ndarray:
     """
 
@@ -49,7 +48,7 @@ def load_image(
     :param absolute_max:
     :return: 256x256 image
     """
-    return _load_image(cn, cw, weights, cellsize, absolute_max)
+    return _load_image(cn, cw, weights, cellsize)
 
 cdef _deg2num(
         double lat_deg,
@@ -112,8 +111,8 @@ cdef _degs2nums(
         unsigned char zoom,
 ):
     cdef unsigned int length = len(lat_degs)
-    cdef np.ndarray[UINT32, ndim = 1] xtiles = np.zeros((1, length), dtype=np.uint32)
-    cdef np.ndarray[UINT32, ndim = 1] ytiles = np.zeros((1, length), dtype=np.uint32)
+    cdef np.ndarray[UINT64, ndim = 1] xtiles = np.zeros((length), dtype=np.uint32)
+    cdef np.ndarray[UINT64, ndim = 1] ytiles = np.zeros((length), dtype=np.uint32)
     cdef unsigned int n = 2 ** zoom
     cdef unsigned int k
     for k in range(length):
@@ -124,7 +123,11 @@ cdef _degs2nums(
         ytiles[k] = ytile
     return xtiles, ytiles
 
-def degs2nums(lat_degs: np.ndarray, lon_degs: np.ndarray, zoom: int):
+def degs2nums(
+        lat_degs: np.ndarray,
+        lon_degs: np.ndarray,
+        zoom: int,
+):
     """
 
     :param lat_degs:
@@ -135,15 +138,15 @@ def degs2nums(lat_degs: np.ndarray, lon_degs: np.ndarray, zoom: int):
     return _degs2nums(lat_degs, lon_degs, zoom)
 
 @cython.boundscheck(False)
-@cython.boundscheck(False)
+@cython.wraparound(False)
 cdef _nums2degs(
-        np.ndarray[UINT32, ndim=1] xtiles,
-        np.ndarray[UINT32, ndim=1] ytiles,
+        np.ndarray[UINT64, ndim=1] xtiles,
+        np.ndarray[UINT64, ndim=1] ytiles,
         unsigned int zoom,
 ):
     cdef unsigned int length = len(xtiles)
-    cdef np.ndarray[F64, ndim = 1] lat_degs = np.zeros((1, length), dtype=np.float64)
-    cdef np.ndarray[F64, ndim = 1] lon_degs = np.zeros((1, length), dtype=np.float64)
+    cdef np.ndarray[F64, ndim = 1] lat_degs = np.zeros((length), dtype=np.float64)
+    cdef np.ndarray[F64, ndim = 1] lon_degs = np.zeros((length), dtype=np.float64)
     cdef unsigned int n = 2 ** zoom
     cdef unsigned int k
     for k in range(length):
@@ -154,7 +157,12 @@ cdef _nums2degs(
         lon_degs[k] = lon_deg
     return lat_degs, lon_degs
 
-def nums2degs(xtiles: np.ndarray, ytiles: np.ndarray, zoom: int) -> tuple[np.ndarray, np.ndarray]:
+def nums2degs(
+        xtiles: np.ndarray,
+        ytiles: np.ndarray,
+        zoom: int,
+        always_xy = False
+) -> tuple[np.ndarray, np.ndarray]:
     """
 
     :param xtiles:
