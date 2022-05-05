@@ -1,4 +1,10 @@
 import os
+from shadow.cutil import (
+    load_image,
+    deg2num,
+    nums2degs
+)
+
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -13,12 +19,6 @@ import shapely.geometry
 from geopandas import GeoDataFrame
 from pandas import Series
 from pyproj import Transformer
-
-from shadow.cutil import (
-    load_image,
-    deg2num,
-    nums2degs
-)
 
 
 def run(
@@ -113,7 +113,7 @@ def run(
     groups = agg.groupby(['tn', 'tw']).groups
 
     paths = [
-        os.path.join(directory, f'{zoom}/{tn}/{tw}')
+        os.path.join(directory, f'{zoom}/{tn}/{tw}.png')
         for tn, tw in groups.keys()
     ]
     nodirs = (
@@ -123,6 +123,7 @@ def run(
     )
     with ThreadPoolExecutor() as te:
         te.map(os.makedirs, nodirs)
+
     subaggs: Iterator[Series] = (
         agg.loc[loc]
         for loc in groups.values()
