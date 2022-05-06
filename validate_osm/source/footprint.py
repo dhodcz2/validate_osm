@@ -148,7 +148,11 @@ class CallableFootprint:
         annoy.build(10)
 
 
-
+        # We are currently caching based on bounding box, so calling this process
+        #   for every unique bounding box is annoying
+        # TODO: Can we somehow vectorize geometry.intersection()?
+        #   so that instead of individual intersections, we just do one intersection
+        # TODO: TLDR something so that getting compare.aggregate is less annoying
         for i, (g, a) in enumerate(data[['geometry', 'area']].values):
             for n in annoy.get_nns_by_item(i, 30):
                 if i <= n:
