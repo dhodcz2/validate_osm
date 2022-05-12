@@ -1,49 +1,30 @@
-import pandas
+if True:
+    # TODO: For some strange reason, importing geopandas before shadow.cutil causes an ImportError
+    from shadow.cutil import (
+        load_image,
+        deg2num,
+        nums2degs,
+        num2deg
+    )
 
-from shadow.cutil import (
-    load_image,
-    deg2num,
-    nums2degs,
-    num2deg,
-    degs2nums
-)
-
-import functools
-import pyproj
-import pygeos.creation
-import itertools
 import math
-
-import dask
-import dask.dataframe as dd
-import dask.array as da
-import dask.bag as db
-import dask_geopandas as dg
-
-import numpy
-import pygeos.creation
-
+import os
 import time
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 from typing import Iterator
 
-from geopandas import GeoDataFrame, GeoSeries
-from pandas import Series, DataFrame
-import geopy.distance
-from geopandas import GeoSeries
 import cv2
+import dask_geopandas
 import geopandas as gpd
-# TODO: For some strange reason, importing geopandas before shadow.cutil causes an ImportError
+import geopy.distance
 import numpy as np
 import pandas as pd
-import shapely.geometry
+import pygeos.creation
+import pygeos.creation
+import pyproj
 from geopandas import GeoDataFrame
 from pandas import Series
 from pyproj import Transformer
-from dask_geopandas import GeoDataFrame as DaskGeoDataFrame
-import dask_geopandas
-import os
 
 
 def get_tiles(gdf: GeoDataFrame, zoom: int) -> tuple[GeoDataFrame, GeoDataFrame]:
@@ -218,7 +199,6 @@ def partition_mapping(
             agg.values * (2 ** 16 - 1)
     ).astype(np.uint16)
 
-
     groups = agg.groupby('tntw', sort=False).groups
     tntw = np.fromiter(groups.keys(), dtype=np.uint64)
     tn = np.bitwise_and(tntw, (2 ** 64 - (2 ** 32))) >> 32
@@ -250,6 +230,44 @@ def partition_mapping(
     )
     with ThreadPoolExecutor() as te:
         te.map(cv2.imwrite, paths, images)
+
+def run(
+        gdf: GeoDataFrame,
+        zoom: int,
+        max_height: float = None,
+        outputfolder: str = None,
+) -> None:
+    # TODO: I think Los Angeles will fail because of a huge cellsize. I need to look into implementing cells with
+    #   from_delayed
+    """
+
+    :param gdf: building data with column 'height'
+    :param zoom: slippy tile zoom
+    :param max_height: maximum height across datasets, for normalization purposes
+    :param outputfolder: output directory
+    :return:
+    """
+    if outputfolder is None:
+        outputfolder = os.getcwd()
+    if max_height is None:
+        max_height = gdf['height'].max()
+    gdf, tiles = get_tiles(gdf, zoom)
+    cells = get_cells(tiles, 10.0)
+    cells: dask_geopandas.GeoDataFrame = dask_geopandas.from_geopandas(cells, chunksize=chunksize, sort=True)
+    gdf: dask_geopandas.GeoDataFrame = dask_geopandas.from_geopandas(gdf, chunksize=chunksize, sort=True)
+
+    pd.set_option('mode.chained_assignment', None)
+    cells.map_partitions(
+        partition_mapping,
+        gdf=gdf,
+        meta=(None, None),
+        max_height=max_height,
+        directory=outputfolder,
+        cell_length=cell_length,
+        align_dataframes=True
+    ).compute()
+    pd.set_option('mode.chained_assignment', 'warn')
+
 
 
 if __name__ == '__main__':
