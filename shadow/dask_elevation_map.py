@@ -252,10 +252,10 @@ def run(
         outputfolder = os.getcwd()
     if max_height is None:
         max_height = gdf['height'].max()
-    grid_size = cell_length ** 2
     gdf, tiles = get_tiles(gdf, zoom)
     cells = get_cells(tiles, 10.0)
     cell_length = len(cells['cn'].unique())
+    grid_size = cell_length ** 2
     cells: dask_geopandas.GeoDataFrame = dask_geopandas.from_geopandas(cells, chunksize=chunksize, sort=True)
     gdf: dask_geopandas.GeoDataFrame = dask_geopandas.from_geopandas(gdf, chunksize=chunksize, sort=True)
 
