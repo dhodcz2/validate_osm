@@ -256,6 +256,7 @@ def run(
     cells = get_cells(tiles, 10.0)
     cell_length = len(cells['cn'].unique())
     grid_size = cell_length ** 2
+    chunksize = grid_size * 50
     cells: dask_geopandas.GeoDataFrame = dask_geopandas.from_geopandas(cells, chunksize=chunksize, sort=True)
     gdf: dask_geopandas.GeoDataFrame = dask_geopandas.from_geopandas(gdf, chunksize=chunksize, sort=True)
 
