@@ -1,3 +1,5 @@
+import pandas
+
 from shadow.cutil import (
     load_image,
     deg2num,
@@ -92,14 +94,14 @@ def get_tiles(gdf: GeoDataFrame, zoom: int) -> tuple[GeoDataFrame, GeoDataFrame]
         trans.transform(tge[-1], tgn[0])[0]
     )
 
-    # tn = np.repeat(tn, len(tw))
-    # tw = np.tile(tw, len(tn))
     repeat_rows = len(tw)
     tile_columns = len(tn)
-    tn, tw = np.repeat(tn, repeat_rows), np.tile(tw, tile_columns)
-    tntw = pd.MultiIndex.from_arrays((tn, tw))
-    tntw = pd.util.hash_pandas_object(tntw)
-    tntw = pd.Index(tntw, name='tntw')
+    tn = np.repeat(tn, repeat_rows)
+    tw = np.tile(tw, tile_columns)
+
+    tns = tn << 32
+    tntw = np.bitwise_or(tns, tw)
+    tntw = pd.Index(tntw, name='tntw', dtype=np.uint64)
 
     tpw = np.tile(tpw, tile_columns)
     tps = np.repeat(tps, repeat_rows)
@@ -110,7 +112,7 @@ def get_tiles(gdf: GeoDataFrame, zoom: int) -> tuple[GeoDataFrame, GeoDataFrame]
     w = (tpe - tpw)
 
     tiles = GeoDataFrame({
-        'tn': tn, 'tw': tw,
+        # 'tn': tn, 'tw': tw,
         'tpw': tpw, 'tps': tps, 'tpe': tpe, 'tpn': tpn,
         'h': h, 'w': w,
     }, index=tntw, geometry=geometry, crs=gdf.crs)
@@ -129,53 +131,59 @@ def get_cells(tiles: GeoDataFrame, cell_length: float = 10.0) -> GeoDataFrame:
     trans = pyproj.Transformer.from_crs(tiles.crs, 4326, always_xy=True)
     (w, e), (s, n) = trans.transform((w, e), (n, s))
     distance = geopy.distance.distance((n, w), (s, w)).meters
-    cell_count = math.ceil(distance / cell_length)
-    grid_count = cell_count ** 2
 
-    # h = np.repeat(tiles['h'], grid_count)
-    # w = np.repeat(tiles['w'], grid_count)
-    # area = np.abs(h * w)
-    # area = np.repeat(area, grid_count)
-
-    h = tiles['h'].values
-    w = tiles['w'].values
-    # TODO: Create dask_gdf of gdf and cells, and call map_partitions
-    tpnr = np.repeat(tiles['tpn'].values, grid_count)
-    tpwr = np.repeat(tiles['tpw'].values, grid_count)
-    tpsr = np.repeat(tiles['tps'].values, grid_count)
-    tper = np.repeat(tiles['tpe'].values, grid_count)
-
-    area = np.abs(h * w)
-    arear = np.repeat(area, grid_count)
-    hr = np.repeat(h, grid_count)
-    wr = np.repeat(w, grid_count)
-
-    cn = np.repeat(range(cell_count), cell_count)
-    cw = np.tile(range(cell_count), cell_count)
-    cs = np.repeat(range(1, cell_count + 1), cell_count)
-    ce = np.tile(range(1, cell_count + 1), cell_count)
-
+    length_cells = math.ceil(distance / cell_length)
     tile_count = len(tiles)
+    area_cells = length_cells ** 2
+
+    dh = tiles['h'].values / length_cells
+    dw = tiles['w'].values / length_cells
+
+    # cn = np.repeat(range(length_cells), length_cells)
+    # cw = np.tile(range(length_cells), length_cells)
+    # cs = np.repeat(range(1, length_cells + 1), length_cells)
+    # ce = np.tile(range(1, length_cells + 1), length_cells)
+    cn = np.repeat(
+        np.arange(length_cells, dtype=np.uint64), length_cells,
+    )
+    cw = np.tile(
+        np.arange(length_cells, dtype=np.uint64), length_cells,
+    )
+    cs = np.repeat(
+        np.arange(1, length_cells + 1, dtype=np.uint64), length_cells
+    )
+    ce = np.tile(
+        np.arange(1, length_cells + 1, dtype=np.uint64), length_cells
+    )
+
     cnr = np.tile(cn, tile_count)
     cwr = np.tile(cw, tile_count)
     csr = np.tile(cs, tile_count)
     cer = np.tile(ce, tile_count)
 
-    cpn = tpnr + (cnr * hr)
-    cpw = tpwr + (cwr * wr)
-    cps = tpsr + (csr * hr)
-    cpe = tper + (cer * wr)
+    tpnr = np.repeat(tiles['tpn'].values, area_cells)
+    tpwr = np.repeat(tiles['tpw'].values, area_cells)
 
-    index = tiles.index.repeat(grid_count)
+    dhr = np.repeat(dh, area_cells)
+    dwr = np.repeat(dw, area_cells)
+
+    cpn = tpnr + (dhr * cnr)
+    cps = tpnr + (dhr * csr)
+    cpw = tpwr + (dwr * cwr)
+    cpe = tpwr + (dwr * cer)
+
+    index = tiles.index.repeat(area_cells)
     geometry = pygeos.creation.box(cpw, cps, cpe, cpn)
 
-    tnr = tiles['tn'].repeat(grid_count)
-    twr = tiles['tw'].repeat(grid_count)
-    cnr = cn.repeat(tile_count)
-    cwr = cw.repeat(tile_count)
+    cnr = np.tile(cn, tile_count)
+    cwr = np.tile(cw, tile_count)
+
+    area = np.abs(dh * dw)
+    arear = np.repeat(area, area_cells)
 
     cells = GeoDataFrame({
-        'tn': tnr, 'tw': twr, 'cn': cnr, 'cw': cwr,
+        # 'tn': tnr, 'twr': twr,
+        'cn': cnr, 'cw': cwr,
         'area': arear,
     }, index=index, geometry=geometry, crs=tiles.crs)
     return cells
@@ -188,25 +196,37 @@ def partition_mapping(
         directory: str,
         cell_length: int,
 ):
-    gdf = gdf.loc[cells.index.unique()]
+    # I don't care about chained assignment because after this is done the GDFs are just going to be thrown in the trash
+    gdf = gdf.loc[cells.index.unique()]  # Get only the geometry relevant to the cells
     icell, igdf = gdf.sindex.query_bulk(cells.geometry)
+
     cells: GeoDataFrame = cells.iloc[icell]
     gdf: GeoDataFrame = gdf.iloc[igdf]
 
-    t = time.time()
-    intersection: Series = cells.intersection(gdf, align=False).area
-    print(f'\t{(time.time() - t)/60} minutes for {len(cells)=}')
+    intersection: Series = cells.intersection(gdf.geometry, align=False).area
 
-    weight: Series = intersection / cells['area'].values * gdf['height'].values / max_height
+    # weight: Series = intersection.values / cells['area'].values * gdf['height'].values / max_height * (2 ** 16 - 1)
+    weight: np.ndarray = (
+            intersection.values
+            / cells['area'].values
+            * gdf['height'].values
+            / max_height
+    )
     cells['weight'] = weight
+    agg: GeoDataFrame = cells.groupby(['tntw', 'cn', 'cw'], sort=False).agg({'weight': 'sum'})
+    agg['weight'] = (
+            agg.values * (2 ** 16 - 1)
+    ).astype(np.uint16)
 
-    agg: GeoDataFrame = cells.groupby('tn tw cn cw'.split()).agg({'weight': 'sum'})
-    agg['weight'] = agg['weight'].astype(np.uint16)
-    groups = agg.groupby(['tn', 'tw']).groups
+
+    groups = agg.groupby('tntw', sort=False).groups
+    tntw = np.fromiter(groups.keys(), dtype=np.uint64)
+    tn = np.bitwise_and(tntw, (2 ** 64 - (2 ** 32))) >> 32
+    tw = np.bitwise_and(tntw, (2 ** 32 - 1))
 
     paths = [
-        os.path.join(directory, f'{zoom}/{tn}/{tw}.png')
-        for tn, tw in groups.keys()
+        os.path.join(directory, f'{zoom}/{tn_}/{tw_}.png')
+        for tn_, tw_ in zip(tn, tw)
     ]
     nodirs = (
         dir
@@ -219,7 +239,7 @@ def partition_mapping(
         agg.loc[loc]
         for loc in groups.values()
     )
-    images = [
+    images = (
         load_image(
             cn=subagg.index.get_level_values('cn').values,
             cw=subagg.index.get_level_values('cw').values,
@@ -227,21 +247,10 @@ def partition_mapping(
             cell_length=cell_length,
         )
         for subagg in subaggs
-    ]
+    )
     with ThreadPoolExecutor() as te:
         te.map(cv2.imwrite, paths, images)
-    # TODO: figure out why all the cels are 0
-    print()
 
-def test_partition_mapping(
-        gdf: GeoDataFrame,
-        cells: GeoDataFrame,
-        max_height: float,
-        directory: str,
-        cell_length: int,
-):
-    if not cells.index.difference(gdf.index).empty:
-        raise ValueError
 
 if __name__ == '__main__':
     zoom = 15
@@ -253,9 +262,13 @@ if __name__ == '__main__':
 
     max_height = gdf['height'].max()
     cell_length = len(cells['cn'].unique())
+    grid_size = cell_length ** 2
+    # Should we really do partitions based on grid_size?
+    # TODO: Get the biggest chunksize multiple of grid_size that main memory can afford
+    chunksize = grid_size * 50
 
-    cells: dask_geopandas.GeoDataFrame = dask_geopandas.from_geopandas(cells, chunksize=5000, sort=True)
-    gdf: dask_geopandas.GeoDataFrame = dask_geopandas.from_geopandas(gdf, chunksize=5000, sort=True)
+    cells: dask_geopandas.GeoDataFrame = dask_geopandas.from_geopandas(cells, chunksize=chunksize, sort=True)
+    gdf: dask_geopandas.GeoDataFrame = dask_geopandas.from_geopandas(gdf, chunksize=chunksize, sort=True)
     # max_height = gdf['height'].max()
     # cell_length = len(cells['cn'].unique())
 
@@ -264,6 +277,7 @@ if __name__ == '__main__':
     #     building=gdf['geometry'],
     # )
     #
+    pd.set_option('mode.chained_assignment', None)
     print('partition mapping')
     t = time.time()
     cells.map_partitions(
@@ -284,10 +298,4 @@ if __name__ == '__main__':
     #     cell_length=cell_length,
     # )
     print(f'optimized took {(time.time() - t) / 60} minutes')
-
-
-
-
-
-
-
+    pd.set_option('mode.chained_assignment', 'warn')
