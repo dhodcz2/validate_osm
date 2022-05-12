@@ -61,3 +61,4 @@ webencodings
 zipp
 opencv-python
 scikit-learn
+dask_geopandas
