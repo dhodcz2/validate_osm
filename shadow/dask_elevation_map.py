@@ -207,7 +207,7 @@ def partition_mapping(
     tw = np.bitwise_and(tntw, (2 ** 32 - 1))
 
     paths = [
-        os.path.join(directory, f'{zoom}/{tn_}/{tw_}.png')
+        os.path.join(directory, f'{zoom}/{tw_}/{tn_}.png')
         for tn_, tw_ in zip(tn, tw)
     ]
     nodirs = (
@@ -280,51 +280,3 @@ if __name__ == '__main__':
     t = time.time()
     run( gdf, 15, )
     print(f"{(time.time() - t)/60:.2f} minutes")
-
-# if __name__ == '__main__':
-#     zoom = 15
-#     print('reading file...')
-#     gdf = gpd.read_feather('/home/arstneio/Downloads/new_york_city.feather')
-#
-#     gdf, tiles = get_tiles(gdf, zoom)
-#     cells = get_cells(tiles, 10.0)
-#
-#     max_height = gdf['height'].max()
-#     cell_length = len(cells['cn'].unique())
-#     grid_size = cell_length ** 2
-#     # Should we really do partitions based on grid_size?
-#     # TODO: Get the biggest chunksize multiple of grid_size that main memory can afford
-#     chunksize = grid_size * 50
-#
-#     cells: dask_geopandas.GeoDataFrame = dask_geopandas.from_geopandas(cells, chunksize=chunksize, sort=True)
-#     gdf: dask_geopandas.GeoDataFrame = dask_geopandas.from_geopandas(gdf, chunksize=chunksize, sort=True)
-#     # max_height = gdf['height'].max()
-#     # cell_length = len(cells['cn'].unique())
-#
-#     # cells: dask_geopandas.GeoDataFrame = cells.assign(
-#     #     height=gdf['height'],
-#     #     building=gdf['geometry'],
-#     # )
-#     #
-#     pd.set_option('mode.chained_assignment', None)
-#     print('partition mapping')
-#     t = time.time()
-#     cells.map_partitions(
-#         partition_mapping,
-#         gdf=gdf,
-#         meta=(None, None),
-#         max_height=max_height,
-#         directory=os.getcwd(),
-#         cell_length=cell_length,
-#         align_dataframes=True
-#     ).compute()
-#     # gdf.map_partitions(
-#     #     partition_mapping,
-#     #     cells,
-#     #     meta=(None, None),
-#     #     max_height=max_height,
-#     #     directory=os.getcwd(),
-#     #     cell_length=cell_length,
-#     # )
-#     print(f'optimized took {(time.time() - t) / 60} minutes')
-#     pd.set_option('mode.chained_assignment', 'warn')
