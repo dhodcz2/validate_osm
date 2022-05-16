@@ -1,5 +1,3 @@
-import argparse
-
 if True:
     # TODO: For some strange reason, importing geopandas before shadow.cutil causes an ImportError
     from shadow.cutil import (
@@ -24,7 +22,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Iterator
 
 import cv2
-import dask_geopandas as dgpd
+import dask_geopandas
 import geopandas as gpd
 import geopy.distance
 import numpy as np
@@ -36,35 +34,12 @@ from geopandas import GeoDataFrame
 from pandas import Series
 from pyproj import Transformer
 from dask import delayed
-from pathlib import Path
 
 
-def _max_height(gdf: GeoDataFrame | dgpd.GeoDataFrame | str | Path) -> tuple[float, dgpd.GeoDataFrame]:
-    if isinstance(gdf, GeoDataFrame):
-        if isinstance(gdf, GeoDataFrame):
-            gdf = dgpd.from_dask_dataframe(gdf)
-    elif isinstance(gdf, str | Path):
-        if isinstance(gdf, str):
-            ext = gdf.rpartition('.')[2]
-        else:
-            ext = gdf.name.rpartition('.')[2]
-
-        match ext:
-            case 'feather':
-                gdf = dgpd.read_feather(gdf)
-            case 'parquet':
-                gdf = dgpd.read_parquet(gdf)
-            case _:
-                gdf = dgpd.read_file(gdf)
-    else:
-        raise TypeError
-    gdf: dgpd.GeoDataFrame
-    return gdf['height'].max().compute(), gdf
-
-
-def get_tiles(gdf: dgpd.GeoDataFrame, zoom: int) -> GeoDataFrame:
-    pw, ps, pe, pn = gdf.total_bounds.compute()
-
+def get_tiles(gdf: GeoDataFrame, zoom: int) -> tuple[GeoDataFrame, GeoDataFrame]:
+    # TODO: dask.delayed to speedup this thing
+    # Get tile bounds from GDF
+    pw, ps, pe, pn = gdf.total_bounds
     trans = Transformer.from_crs(gdf.crs, 4326, always_xy=True)
     gw, gn = trans.transform(pw, pn)
     ge, gs = trans.transform(pe, ps)
@@ -133,38 +108,99 @@ def get_tiles(gdf: dgpd.GeoDataFrame, zoom: int) -> GeoDataFrame:
         'h': h, 'w': w,
     }, index=tntw, geometry=geometry, crs=gdf.crs)
 
-    return tiles
-
-    # itile, igdf = gdf.sindex.query_bulk(tiles.geometry)
-    # gdf: GeoDataFrame = gdf.iloc[igdf]
-    # tiles: GeoDataFrame = tiles.iloc[itile]
-    # gdf = gdf.set_index(tiles.index)
-    # # tiles: GeoDataFrame = tiles.loc[tiles.index.unique()]
-    # tiles: GeoDataFrame = tiles.loc[~tiles.index.duplicated()]
-    # return gdf, tiles
+    itile, igdf = gdf.sindex.query_bulk(tiles.geometry)
+    gdf: GeoDataFrame = gdf.iloc[igdf]
+    tiles: GeoDataFrame = tiles.iloc[itile]
+    gdf = gdf.set_index(tiles.index)
+    # tiles: GeoDataFrame = tiles.loc[tiles.index.unique()]
+    tiles: GeoDataFrame = tiles.loc[~tiles.index.duplicated()]
+    return gdf, tiles
 
 
-def get_cells(tiles: GeoDataFrame, cell_length: float = 10.0) -> tuple[dgpd.GeoDataFrame, int]:
+def _get_cells(tiles: GeoDataFrame, cell_length: float = 10.0) -> GeoDataFrame:
     s, w, n, e = tiles.geometry.iloc[0].bounds
-    cells_oned = math.ceil(
+    # length_cells = math.ceil((s - n)/cell_length)
+    length_cells = math.ceil(
         abs(s - n) / cell_length
     )
-    cells_twod = cells_oned ** 2
+    area_cells = length_cells ** 2
     tile_count = len(tiles)
 
-    dh = tiles['h'].values / cells_oned
-    dw = tiles['w'].values / cells_oned
+    dh = tiles['h'].values / length_cells
+    dw = tiles['w'].values / length_cells
+
+    # cn = np.repeat(range(length_cells), length_cells)
+    # cw = np.tile(range(length_cells), length_cells)
+    # cs = np.repeat(range(1, length_cells + 1), length_cells)
+    # ce = np.tile(range(1, length_cells + 1), length_cells)
     cn = np.repeat(
-        np.arange(cells_oned, dtype=np.uint64), cells_oned,
+        np.arange(length_cells, dtype=np.uint64), length_cells,
     )
     cw = np.tile(
-        np.arange(cells_oned, dtype=np.uint64), cells_oned,
+        np.arange(length_cells, dtype=np.uint64), length_cells,
     )
     cs = np.repeat(
-        np.arange(1, cells_oned + 1, dtype=np.uint64), cells_oned
+        np.arange(1, length_cells + 1, dtype=np.uint64), length_cells
     )
     ce = np.tile(
-        np.arange(1, cells_oned + 1, dtype=np.uint64), cells_oned
+        np.arange(1, length_cells + 1, dtype=np.uint64), length_cells
+    )
+
+    cnr = np.tile(cn, tile_count)
+    cwr = np.tile(cw, tile_count)
+    csr = np.tile(cs, tile_count)
+
+    cer = np.tile(ce, tile_count)
+    # TODO: fix distance, use dask.delayed
+    tpnr = np.repeat(tiles['tpn'].values, area_cells)
+    tpwr = np.repeat(tiles['tpw'].values, area_cells)
+
+    dhr = np.repeat(dh, area_cells)
+    dwr = np.repeat(dw, area_cells)
+
+    cpn = tpnr + (dhr * cnr)
+    cps = tpnr + (dhr * csr)
+    cpw = tpwr + (dwr * cwr)
+    cpe = tpwr + (dwr * cer)
+
+    index = tiles.index.repeat(area_cells)
+    geometry = pygeos.creation.box(cpw, cps, cpe, cpn)
+
+    cnr = np.tile(cn, tile_count)
+    cwr = np.tile(cw, tile_count)
+
+    area = np.abs(dh * dw)
+    arear = np.repeat(area, area_cells)
+
+    cells = GeoDataFrame({
+        # 'tn': tnr, 'twr': twr,
+        'cn': cnr, 'cw': cwr,
+        'area': arear,
+    }, index=index, geometry=geometry, crs=tiles.crs)
+    return cells
+
+
+def get_cells(tiles: GeoDataFrame, cell_length: float = 10.0) -> dask_geopandas.GeoDataFrame:
+    s, w, n, e = tiles.geometry.iloc[0].bounds
+    length_cells = math.ceil(
+        abs(s - n) / cell_length
+    )
+    area_cells = length_cells ** 2
+    tile_count = len(tiles)
+
+    dh = tiles['h'].values / length_cells
+    dw = tiles['w'].values / length_cells
+    cn = np.repeat(
+        np.arange(length_cells, dtype=np.uint64), length_cells,
+    )
+    cw = np.tile(
+        np.arange(length_cells, dtype=np.uint64), length_cells,
+    )
+    cs = np.repeat(
+        np.arange(1, length_cells + 1, dtype=np.uint64), length_cells
+    )
+    ce = np.tile(
+        np.arange(1, length_cells + 1, dtype=np.uint64), length_cells
     )
 
     cnr = np.tile(cn, tile_count)
@@ -172,50 +208,48 @@ def get_cells(tiles: GeoDataFrame, cell_length: float = 10.0) -> tuple[dgpd.GeoD
     csr = np.tile(cs, tile_count)
     cer = np.tile(ce, tile_count)
 
-    tpnr = np.repeat(tiles['tpn'].values, cells_twod)
-    tpwr = np.repeat(tiles['tpw'].values, cells_twod)
+    tpnr = np.repeat(tiles['tpn'].values, area_cells)
+    tpwr = np.repeat(tiles['tpw'].values, area_cells)
 
-    dhr = np.repeat(dh, cells_twod)
-    dwr = np.repeat(dw, cells_twod)
+    dhr = np.repeat(dh, area_cells)
+    dwr = np.repeat(dw, area_cells)
 
     cpn = tpnr + (dhr * cnr)
     cps = tpnr + (dhr * csr)
     cpw = tpwr + (dwr * cwr)
     cpe = tpwr + (dwr * cer)
 
-    index = tiles.index.repeat(cells_twod)
+    index = tiles.index.repeat(area_cells)
     cnr = np.tile(cn, tile_count)
     cwr = np.tile(cw, tile_count)
 
     area = np.abs(dh * dw)
-    arear = np.repeat(area, cells_twod)
-
+    arear = np.repeat(area, area_cells)
     cells = DataFrame({
         'cpn': cpn, 'cps': cps, 'cpw': cpw, 'cpe': cpe,
         'cn': cnr, 'cw': cwr,
         'area': arear,
     }, index=index)
-    cells: dd.DataFrame = dask.dataframe.from_pandas(cells, chunksize=cells_twod,sort=False)
+    cells: dd.DataFrame = dask.dataframe.from_pandas(cells, 8, sort=False)
+    meta = {
+        'geometry': object,
+        'cn': 'uint64', 'cw': 'uint64',
+        'area': 'float64',
+    }
     def func(df: DataFrame):
-        df = df.assign(
+        return df.assign(
             # geometry=pygeos.creation.box(df['cpw'])
             geometry=pygeos.creation.box(
                 df['cpw'].values,
                 df['cps'].values,
                 df['cpe'].values,
                 df['cpn'].values,
-            ))
-        return df[['geometry', 'cn', 'cw', 'area']]
-
-    meta = {
-        'geometry': object,
-        'cn': 'uint64', 'cw': 'uint64',
-        'area': 'float64',
-    }
+            )
+        )
 
     cells = cells.map_partitions(func=func, meta=meta)
-    cells: dgpd.GeoDataFrame = dgpd.from_dask_dataframe(cells['geometry cn cw area'.split()])
-    return cells, cells_oned
+    cells = dask_geopandas.from_dask_dataframe(cells)
+    return cells
 
 
 def partition_mapping(
@@ -281,21 +315,34 @@ def partition_mapping(
         te.map(cv2.imwrite, paths, images)
 
 
-def run(gdf: dgpd.GeoDataFrame, zoom: int, max_height: float, outputfolder: str):
-    tiles = get_tiles(gdf, zoom)
+def run(
+        gdf: GeoDataFrame,
+        zoom: int,
+        max_height: float = None,
+        outputfolder: str = None,
+) -> None:
+    # TODO: I think Los Angeles will fail because of a huge cellsize. I need to look into implementing cells with
+    #   from_delayed
+    """
 
-    gdf = gdf.sjoin(tiles[['geometry']])
-    gdf: dgpd.GeoDataFrame = gdf.rename(columns={'index_right': tiles.index.name})
-    gdf = gdf.set_index('tntw')
-
-    tiles = tiles.drop(tiles.index.difference(gdf.index))
-    cells, length_cells = get_cells(tiles, 10.0)
-
-    gdf.join(cells, 'tntw', 'outer', lsuffix='_gdf', rsuffix='_cells')
-
-
-    grid_size = length_cells ** 2
+    :param gdf: building data with column 'height'
+    :param zoom: slippy tile zoom
+    :param max_height: maximum height across datasets, for normalization purposes
+    :param outputfolder: output directory
+    :return:
+    """
+    if outputfolder is None:
+        outputfolder = os.getcwd()
+    if max_height is None:
+        max_height = gdf['height'].max()
+    gdf, tiles = get_tiles(gdf, zoom)
+    cells = get_cells(tiles, 10.0)
+    cell_length = len(cells['cn'].unique())
+    grid_size = cell_length ** 2
     chunksize = grid_size * 50
+    # cells: dask_geopandas.GeoDataFrame = dask_geopandas.from_geopandas(cells, chunksize=chunksize, sort=True)
+    gdf: dask_geopandas.GeoDataFrame = dask_geopandas.from_geopandas(gdf, chunksize=chunksize, sort=True)
+
     pd.set_option('mode.chained_assignment', None)
     cells.map_partitions(
         partition_mapping,
@@ -304,94 +351,14 @@ def run(gdf: dgpd.GeoDataFrame, zoom: int, max_height: float, outputfolder: str)
         max_height=max_height,
         directory=outputfolder,
         zoom=zoom,
-        length_cells=length_cells,
+        cell_length=cell_length,
         align_dataframes=True,
     ).compute()
     pd.set_option('mode.chained_assignment', 'warn')
 
 
-class Namespace:
-    input: list[str]
-    output: list[str]
-    verbose: bool
-    zoom: list[int]
-    cell_length: float
-    max: float
-
-
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='generate elevation map from geometric data')
-    parser.add_argument(
-        'input',
-        nargs='+',
-        help='input files for which elevation maps will be generated'
-    )
-    parser.add_argument(
-        '--output',
-        '-o',
-        nargs='*',
-        help='output directories in which the elevation maps will be generated',
-        default=[os.getcwd()],
-    )
-    parser.add_argument(
-        '--verbose',
-        '-v',
-        action='store_true'
-    )
-    parser.add_argument(
-        '--zoom',
-        nargs='+',
-        type=int,
-        help='slippy tile zoom levels at which the elevation map will be generated',
-    )
-    parser.add_argument(
-        '--length',
-        type=float,
-        help='projected length for each cell within a slippy tile',
-        default=10.0
-    )
-    parser.add_argument(
-        '--max',
-        type=float,
-        help='max height',
-        default=0
-    )
-    args = parser.parse_args(namespace=Namespace)
-
-
-    def gdfs() -> Iterator[dgpd.GeoDataFrame]:
-        for path in args.input:
-            match path.rpartition('.')[2]:
-                case 'feather':
-                    yield dgpd.read_feather(path)
-                case 'parquet':
-                    yield dgpd.read_parquet(path)
-                case _:
-                    yield dgpd.read_file(path)
-
-
-    if not args.max:
-        max_height = max(gdf['height'].max() for gdf in gdfs()).compute()
-    else:
-        max_height = args.max
-
-    cwd = os.getcwd()
-    if not args.output:
-        args.output = (
-            os.path.join(
-                cwd,
-                input.rpartition('/')[2].rpartition('.')[0]
-            )
-            for input in args.input
-        )
-    else:
-        args.output = (
-            os.path.join(cwd, output)
-            if '.' not in output
-            else output
-            for output in args.output
-        )
-
-    for gdf, output in zip(gdfs(), args.output):
-        for zoom in args.zoom:
-            run(gdf, zoom, max_height, output)
+    gdf = gpd.read_feather('/home/arstneio/Downloads/new_york_city.feather')
+    t = time.time()
+    run(gdf, 15, )
+    print(f"{(time.time() - t) / 60:.2f} minutes")
