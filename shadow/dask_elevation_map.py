@@ -1,6 +1,5 @@
 import argparse
-
-import dask_geopandas
+import multiprocessing
 
 if True:
     # TODO: For some strange reason, importing geopandas before shadow.cutil causes an ImportError
@@ -10,15 +9,10 @@ if True:
         nums2degs,
         num2deg
     )
-from geopandas import GeoDataFrame, GeoSeries
-from pandas import Series, DataFrame
 
 import dask.dataframe as dd
 import dask.array as da
-import dask.bag as db
-import dask_geopandas as dg
 
-import dask
 import math
 import os
 import time
@@ -28,22 +22,16 @@ from typing import Iterator
 import cv2
 import dask_geopandas as dgpd
 import geopandas as gpd
-import geopy.distance
 import numpy as np
 import pandas as pd
 import pygeos.creation
 import pygeos.creation
-import pyproj
 from geopandas import GeoDataFrame
 from pandas import Series
 from pyproj import Transformer
-from dask import delayed
 from pathlib import Path
 
-# def _max_height(gdf: GeoDataFrame | dgpd.GeoDataFrame | str | Path) -> tuple[float, dgpd.GeoDataFrame]:
 from typing import Union
-
-CHUNKSIZE = 50
 
 
 def _max_height(gdf: Union[GeoDataFrame, dgpd.GeoDataFrame, str, Path]) -> tuple[float, dgpd.GeoDataFrame]:
@@ -150,14 +138,17 @@ def get_tiles(gdf: GeoDataFrame, zoom: int) -> GeoDataFrame:
     return tiles
 
 
-def get_cells(tiles: GeoDataFrame, cell_length: float = 10.0) -> dgpd.GeoDataFrame:
+def get_cells(tiles: GeoDataFrame, cell_length: float = 10.0) -> tuple[dgpd.GeoDataFrame, int]:
     s, w, n, e = tiles.geometry.iloc[0].bounds
     cells_oned = math.ceil(
         abs(s - n) / cell_length
     )
     cells_twod = cells_oned ** 2
     tile_count = len(tiles)
-    chunksize = cells_twod * CHUNKSIZE
+
+    mb_per_tile = 8 * 8 * cells_twod / 1024 / 1024
+    tiles_per_chunk = math.floor(75 / mb_per_tile)
+    chunksize = cells_twod * tiles_per_chunk
 
     dh = tiles['h'].values / cells_oned
     dw = tiles['w'].values / cells_oned
@@ -209,123 +200,40 @@ def get_cells(tiles: GeoDataFrame, cell_length: float = 10.0) -> dgpd.GeoDataFra
     cpw = tpwr + (dwr * cwr)
     cpe = tpwr + (dwr * cer)
 
-    tntw = dd.from_array(
+
+    tntw = dd.from_dask_array(da.from_array(
         tiles.index.values.repeat(cells_twod),
-        chunksize=chunksize,
-        columns='tntw',
-    )
-    cnr = dd.from_array(
-        np.tile(cn, tile_count),
-        chunksize=chunksize,
-        columns='cn'
-    )
-    cwr = dd.from_array(
-        np.tile(cw, tile_count),
-        chunksize=chunksize,
-        columns='cw',
-    )
+        chunksize,
+    ), columns='tntw')
     area = np.abs(dh * dw)
-    arear = dd.from_array(
+    arear = dd.from_dask_array(da.from_array(
         np.repeat(area, cells_twod),
-        chunksize=chunksize,
-        columns='area'
-    )
+        chunksize,
+    ), columns='area')
+
     geometry = da.map_blocks(
         pygeos.creation.box, cpw, cps, cpe, cpn,
         dtype=object,
     )
-    # tn = dd.from_array(
-    #     np.repeat(tiles['tn'].values, cells_twod),
-    #     chunksize=chunksize,
-    #     columns='tn',
-    # )
-    # tw = dd.from_array(
-    #     np.repeat(tiles['tw'].values, cells_twod),
-    #     chunksize=chunksize,
-    #     columns='tw'
-    # )
     geometry = dd.from_dask_array(geometry, columns='geometry')
-    # cells = dd.concat([cnr, cwr, arear, geometry, tn, tw], axis=1)
-    # cells = dd.concat([cnr, cwr, arear, geometry, tn, tw, tntw], axis=1)
-    cells = dd.concat([cnr, cwr, arear, geometry, tntw], axis=1)
+    cn = dd.from_dask_array(da.from_array(
+        cnr, chunksize
+    ), 'cn')
+    cw = dd.from_dask_array(da.from_array(
+        cwr, chunksize,
+    ), 'cw')
+    cells = dd.concat([cn, cw, arear, geometry, tntw], axis=1)
     cells: dgpd.GeoDataFrame = dgpd.from_dask_dataframe(cells)
     cells.crs = tiles.crs
-    iloc = list(range(0, tile_count - 1, CHUNKSIZE))
+
+    iloc = list(range(0, tile_count - 1, tiles_per_chunk))
     iloc.append(tile_count - 1)
     divisions = list(tiles.index[iloc])
     cells = cells.set_index('tntw', sorted=True, divisions=divisions)
     return cells, cells_oned
 
 
-def partition_mapping(
-        cells: GeoDataFrame,
-        gdf: GeoDataFrame,
-        max_height: float,
-        directory: str,
-        length_cells: int,
-        zoom: int,
-):
-    # I don't care about chained assignment because after this is done the GDFs are just going to be thrown in the trash
-    gdf = gdf.loc[cells.index.unique()]  # Get only the geometry relevant to the cells
-    icell, igdf = gdf.sindex.query_bulk(cells.geometry)
-
-    cells: GeoDataFrame = cells.iloc[icell]
-    gdf: GeoDataFrame = gdf.iloc[igdf]
-
-    intersection: Series = cells.intersection(gdf.geometry, align=False).area
-
-    # weight: Series = intersection.values / cells['area'].values * gdf['height'].values / max_height * (2 ** 16 - 1)
-    weight: np.ndarray = (
-            intersection.values
-            / cells['area'].values
-            * gdf['height'].values
-            / max_height
-    )
-    cells['weight'] = weight
-    agg: GeoDataFrame = cells.groupby(['tntw', 'cn', 'cw'], sort=False).agg({'weight': 'sum'})
-    agg['weight'] = (
-            agg.values * (2 ** 16 - 1)
-    ).astype(np.uint16)
-
-    groups = agg.groupby('tntw', sort=False).groups
-    tntw = np.fromiter(groups.keys(), dtype=np.uint64)
-    tn = np.bitwise_and(tntw, (2 ** 64 - (2 ** 32))) >> 32
-    tw = np.bitwise_and(tntw, (2 ** 32 - 1))
-
-    paths = [
-        os.path.join(directory, f'{zoom}/{tw_}/{tn_}.png')
-        for tn_, tw_ in zip(tn, tw)
-    ]
-    nodirs = (
-        dir
-        for path in paths
-        if not os.path.exists(dir := os.path.dirname(path))
-    )
-    with ThreadPoolExecutor() as te:
-        te.map(os.makedirs, nodirs)
-    subaggs: Iterator[Series] = (
-        agg.loc[loc]
-        for loc in groups.values()
-    )
-    images = (
-        load_image(
-            cn=subagg.index.get_level_values('cn').values,
-            cw=subagg.index.get_level_values('cw').values,
-            weights=subagg['weight'].values,
-            cell_length=length_cells,
-        )
-        for subagg in subaggs
-    )
-    with ThreadPoolExecutor() as te:
-        te.map(cv2.imwrite, paths, images)
-
-
-def partition_mapping(
-        cells: GeoDataFrame,
-        directory: str,
-        length_cells: int,
-        zoom: int,
-):
+def partition_mapping(cells: GeoDataFrame, directory: str, length_cells: int, zoom: int, ):
     weight: Series = cells.groupby(['tntw', 'cn', 'cw'], sort=False).weight.sum()
     weight: Series = weight.astype(np.uint16)
     groups = weight.groupby('tntw', sort=False).groups
@@ -342,8 +250,6 @@ def partition_mapping(
         for path in paths
         if not os.path.exists(dir := os.path.dirname(path))
     )
-    with ThreadPoolExecutor() as te:
-        te.map(os.makedirs, nodirs)
     subaggs: Iterator[Series] = (
         weight.loc[loc]
         for loc in groups.values()
@@ -358,22 +264,29 @@ def partition_mapping(
         for subagg in subaggs
     )
     with ThreadPoolExecutor() as te:
+        te.map(os.makedirs, nodirs)
+    with ThreadPoolExecutor() as te:
         te.map(cv2.imwrite, paths, images)
 
 
 def run(gdf: GeoDataFrame, zoom: int, max_height: float, outputfolder: str):
     tiles = get_tiles(gdf, zoom)
-    cells, length_cells = get_cells(tiles, 10.0)
+    cells, length_cells = get_cells(tiles)
 
     cells = cells.sjoin(gdf)
     cells = cells.merge(
         gdf[['geometry']], how='left', left_on='index_right', right_index=True, suffixes=('_cells', '_gdf'),
     )
+    del gdf
     cells: dgpd.GeoDataFrame = dgpd.from_dask_dataframe(cells, geometry='geometry_gdf')
 
-    cells['weight'] = (dask_geopandas.GeoSeries.intersection(
-        cells['geometry_gdf'], cells['geometry_cells']
-    ).area / cells['area'] * cells['height'] / max_height * (2 ** 16 - 1))
+    cells['weight'] = (
+            dgpd.GeoSeries.intersection(cells['geometry_gdf'], cells['geometry_cells']).area
+            / cells['area']
+            * cells['height']
+            / max_height
+            * (2 ** 16 - 1)
+    )
 
     cells.map_partitions(
         partition_mapping,
@@ -383,13 +296,6 @@ def run(gdf: GeoDataFrame, zoom: int, max_height: float, outputfolder: str):
         meta=(None, None)
     ).compute()
 
-    # TODO: Because the groupby loses the original partitions, I think it is necessary to map_partitions, and call
-    #   groupby with the singular pandas.DataFrame
-    # dd.DataFrame.groupby will lose the original partitions, so I think
-    # agg: dd.DataFrame = cells.groupby(['tntw', 'cn', 'cw'], sort=False).agg({'weight': 'sum'}, split_out=8)
-    # agg['weight'] = agg['weight'].astype(np.uint16)
-    # groups: dask.dataframe.groupby.SeriesGroupBy = agg.groupby('tntw', sort=False)
-
 
 class Namespace:
     input: list[str]
@@ -398,7 +304,7 @@ class Namespace:
     zoom: list[int]
     cell_length: float
     max: float
-    timeit: bool
+    chunktiles: int
 
 
 if __name__ == '__main__':
@@ -422,6 +328,7 @@ if __name__ == '__main__':
     )
     parser.add_argument(
         '--zoom',
+        '-z',
         nargs='+',
         type=int,
         help='slippy tile zoom levels at which the elevation map will be generated',
@@ -441,17 +348,6 @@ if __name__ == '__main__':
     args = parser.parse_args(namespace=Namespace)
 
 
-    #
-    # def gdfs() -> Iterator[dgpd.GeoDataFrame]:
-    #     for path in args.input:
-    #         ext = path.rpartition('.')[2]
-    #         if ext == 'feather':
-    #             yield dgpd.read_feather(path)
-    #         elif ext == 'parquet':
-    #             yield dgpd.read_parquet(path)
-    #         else:
-    #             yield dgpd.read_file(path)
-    #
     def gdfs() -> Iterator[GeoDataFrame]:
         for path in args.input:
             ext = path.rpartition('.')[2]
@@ -462,11 +358,6 @@ if __name__ == '__main__':
             else:
                 yield gpd.read_file(path)
 
-
-    # if not args.max:
-    #     max_height = max(gdf['height'].max() for gdf in gdfs()).compute()
-    # else:
-    #     max_height = args.max
 
     if not args.max:
         max_height = max(gdf['height'].max() for gdf in gdfs())
@@ -485,7 +376,7 @@ if __name__ == '__main__':
     else:
         args.output = (
             os.path.join(cwd, output)
-            if '.' not in output
+            if '/' not in output
             else output
             for output in args.output
         )
@@ -495,7 +386,8 @@ if __name__ == '__main__':
             for zoom in args.zoom:
                 t = time.time()
                 run(gdf, zoom, max_height, output)
-                print(f"{input} took {(time.time() - t) / 60:.1f} minutes at {zoom=}")
+                dest = os.path.join(output, str(zoom))
+                print(f"{(time.time() - t)/60:.1f}; {input=} {dest=}")
     else:
         for gdf, output in zip(gdfs(), args.output):
             for zoom in args.zoom:
