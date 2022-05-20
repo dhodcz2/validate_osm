@@ -1,16 +1,23 @@
 import argparse
-import multiprocessing
 import warnings
 
 warnings.filterwarnings('ignore', '.*Shapely GEOS.*')
-if True:
-    # TODO: For some strange reason, importing geopandas before shadow.cutil causes an ImportError
-    from shadow.cutil import (
-        load_image,
-        deg2num,
-        nums2degs,
-        num2deg
-    )
+
+# I had to change cutil because the unknown import was messing with running the file outside the project
+from cutil import (
+    load_image,
+    deg2num,
+    nums2degs,
+    num2deg
+)
+
+# if True:
+#     from shadow.cutil import (
+#         load_image,
+#         deg2num,
+#         nums2degs,
+#         num2deg
+#     )
 
 import dask.dataframe as dd
 import dask.array as da

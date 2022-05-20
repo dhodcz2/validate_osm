@@ -9,10 +9,17 @@ pyximport.install(
     setup_args={'include_dirs': np.get_include(), },
     reload_support=True,
 )
-from shadow.cutil.functions import (
+from .functions import (
     load_image,
     num2deg,
     deg2num,
     degs2nums,
     nums2degs,
 )
+# from shadow.cutil.functions import (
+#     load_image,
+#     num2deg,
+#     deg2num,
+#     degs2nums,
+#     nums2degs,
+# )
