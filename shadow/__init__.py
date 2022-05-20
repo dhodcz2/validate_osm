@@ -1,4 +1,4 @@
-
+import cython
 import warnings
 
 import numpy as np
@@ -8,4 +8,4 @@ pyximport.install(
     setup_args={'include_dirs': np.get_include(), },
     reload_support=True,
 )
-from shadow.elevation_map import run
+from shadow.dask_elevation_map import run

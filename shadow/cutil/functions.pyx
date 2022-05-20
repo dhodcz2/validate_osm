@@ -23,9 +23,10 @@ cdef _load_image(
         np.ndarray[UINT64, ndim=1] cn,
         np.ndarray[UINT64, ndim=1] cw,
         np.ndarray[UINT16, ndim=1] weights,
-        unsigned int cell_length,
+        unsigned int rows,
+        unsigned int columns,
 ):
-    cdef np.ndarray[UINT16, ndim=2] grid = np.zeros((cell_length, cell_length), dtype=np.uint16)
+    cdef np.ndarray[UINT16, ndim=2] grid = np.zeros((rows, columns), dtype=np.uint16)
     cdef unsigned int length = len(cw)
     cdef unsigned int k
     for k in range(length):
@@ -36,18 +37,19 @@ def load_image(
         cn: np.ndarray,
         cw: np.ndarray,
         weights: np.ndarray,
-        cell_length: int,
+        rows: int,
+        columns: int,
 ) -> np.ndarray:
     """
 
     :param cn:
     :param cw:
     :param weights:
-    :param cell_length:
-    :param absolute_max:
+    :param rows:
+    :param columns:
     :return: 256x256 image
     """
-    result = _load_image(cn, cw, weights, cell_length)
+    result = _load_image(cn, cw, weights, rows, columns)
     return result
 
 cdef _deg2num(

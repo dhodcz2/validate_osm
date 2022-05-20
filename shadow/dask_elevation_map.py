@@ -5,20 +5,20 @@ import warnings
 warnings.filterwarnings('ignore', '.*Shapely GEOS.*')
 
 # I had to change cutil because the unknown import was messing with running the file outside the project
-from cutil import (
-    load_image,
-    deg2num,
-    nums2degs,
-    num2deg
-)
+# from cutil import (
+#     load_image,
+#     deg2num,
+#     nums2degs,
+#     num2deg
+# )
 
-# if True:
-#     from shadow.cutil import (
-#         load_image,
-#         deg2num,
-#         nums2degs,
-#         num2deg
-#     )
+if True:
+    from shadow.cutil import (
+        load_image,
+        deg2num,
+        nums2degs,
+        num2deg
+    )
 
 import dask.dataframe as dd
 import dask.array as da
@@ -148,36 +148,39 @@ def get_tiles(gdf: GeoDataFrame, zoom: int) -> GeoDataFrame:
     return tiles
 
 
-def get_cells(tiles: GeoDataFrame, cell_length: float = 10.0) -> tuple[dgpd.GeoDataFrame, int]:
+def get_cells(tiles: GeoDataFrame, cell_length: float = 10.0) -> tuple[dgpd.GeoDataFrame, int, int]:
     s, w, n, e = tiles.geometry.iloc[0].bounds
-    cells_oned = math.ceil(
+    rows = math.ceil(
         abs(s - n) / cell_length
     )
-    cells_twod = cells_oned ** 2
+    columns = math.ceil(
+        abs(e - w) / cell_length
+    )
+    cells_per_tile = rows * columns
     tile_count = len(tiles)
 
-    mb_per_tile = 8 * 8 * cells_twod / 1024 / 1024
+    mb_per_tile = 8 * 8 * cells_per_tile / 1024 / 1024
     tiles_per_chunk = math.floor(75 / mb_per_tile)
-    chunksize = cells_twod * tiles_per_chunk
+    chunksize = cells_per_tile * tiles_per_chunk
 
-    dh = tiles['h'].values / cells_oned
-    dw = tiles['w'].values / cells_oned
-    if cells_oned > 255:
+    dh = tiles['h'].values / rows
+    dw = tiles['w'].values / columns
+    if rows > 255:
         raise ValueError(
-            f"{cells_oned=}>255. This means that the image will be downscaled, and cells require more than"
+            f"{rows=}>255. This means that the image will be downscaled, and cells require more than"
             f" uint8. Increase zoom level."
         )
     cn = np.repeat(
-        np.arange(cells_oned, dtype=np.uint8), cells_oned,
+        np.arange(rows, dtype=np.uint8), columns,
     )
     cw = np.tile(
-        np.arange(cells_oned, dtype=np.uint8), cells_oned,
+        np.arange(columns, dtype=np.uint8), rows,
     )
     cs = np.repeat(
-        np.arange(1, cells_oned + 1, dtype=np.uint8), cells_oned
+        np.arange(1, rows + 1, dtype=np.uint8), columns
     )
     ce = np.tile(
-        np.arange(1, cells_oned + 1, dtype=np.uint8), cells_oned
+        np.arange(1, columns + 1, dtype=np.uint8), rows
     )
     cnr = np.tile(cn, tile_count)
     cwr = np.tile(cw, tile_count)
@@ -185,22 +188,22 @@ def get_cells(tiles: GeoDataFrame, cell_length: float = 10.0) -> tuple[dgpd.GeoD
     cer = np.tile(ce, tile_count)
 
     tpnr = da.from_array(
-        np.repeat(tiles['tpn'].values, cells_twod),
+        np.repeat(tiles['tpn'].values, cells_per_tile),
         name='tpnr',
         chunks=chunksize,
     )
     tpwr = da.from_array(
-        np.repeat(tiles['tpw'].values, cells_twod),
+        np.repeat(tiles['tpw'].values, cells_per_tile),
         name='tpwr',
         chunks=chunksize,
     )
     dhr = da.from_array(
-        np.repeat(dh, cells_twod),
+        np.repeat(dh, cells_per_tile),
         name='dhr',
         chunks=chunksize,
     )
     dwr = da.from_array(
-        np.repeat(dw, cells_twod),
+        np.repeat(dw, cells_per_tile),
         name='dwr',
         chunks=chunksize,
     )
@@ -211,12 +214,12 @@ def get_cells(tiles: GeoDataFrame, cell_length: float = 10.0) -> tuple[dgpd.GeoD
     cpe = tpwr + (dwr * cer)
 
     tntw = dd.from_dask_array(da.from_array(
-        tiles.index.values.repeat(cells_twod),
+        tiles.index.values.repeat(cells_per_tile),
         chunksize,
     ), columns='tntw')
     area = np.abs(dh * dw)
     arear = dd.from_dask_array(da.from_array(
-        np.repeat(area, cells_twod),
+        np.repeat(area, cells_per_tile),
         chunksize,
     ), columns='area')
 
@@ -239,10 +242,10 @@ def get_cells(tiles: GeoDataFrame, cell_length: float = 10.0) -> tuple[dgpd.GeoD
     iloc.append(tile_count - 1)
     divisions = list(tiles.index[iloc])
     cells = cells.set_index('tntw', sorted=True, divisions=divisions)
-    return cells, cells_oned
+    return cells, rows, columns
 
 
-def partition_mapping(cells: GeoDataFrame, directory: str, length_cells: int, zoom: int, ):
+def partition_mapping(cells: GeoDataFrame, directory: str, rows: int, columns: int, zoom: int, ):
     weight: Series = cells.groupby(['tntw', 'cn', 'cw'], sort=False).weight.sum()
     weight: Series = weight.astype(np.uint16)
     groups = weight.groupby('tntw', sort=False).groups
@@ -268,7 +271,8 @@ def partition_mapping(cells: GeoDataFrame, directory: str, length_cells: int, zo
             cn=subagg.index.get_level_values('cn').values,
             cw=subagg.index.get_level_values('cw').values,
             weights=subagg.values,
-            cell_length=length_cells,
+            rows=rows,
+            columns=columns,
         )
         for subagg in subaggs
     )
@@ -280,7 +284,7 @@ def partition_mapping(cells: GeoDataFrame, directory: str, length_cells: int, zo
 
 def run(gdf: GeoDataFrame, zoom: int, max_height: float, outputfolder: str):
     tiles = get_tiles(gdf, zoom)
-    cells, length_cells = get_cells(tiles)
+    cells, rows, columns = get_cells(tiles)
 
     cells = cells.sjoin(gdf)
     cells = cells.merge(
@@ -304,7 +308,8 @@ def run(gdf: GeoDataFrame, zoom: int, max_height: float, outputfolder: str):
     cells.map_partitions(
         partition_mapping,
         directory=outputfolder,
-        length_cells=length_cells,
+        rows=rows,
+        columns=columns,
         zoom=zoom,
         meta=meta,
     ).compute()
