@@ -31,7 +31,8 @@ cdef _load_image(
     cdef unsigned int k
     for k in range(length):
         grid[cn[k], cw[k]] = weights[k]
-    return cv2.resize(grid, dsize=(256, 256))
+    return grid
+    # return cv2.resize(grid, dsize=(256, 256))
 
 def load_image(
         cn: np.ndarray,
