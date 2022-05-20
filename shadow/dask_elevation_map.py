@@ -149,13 +149,15 @@ def get_tiles(gdf: GeoDataFrame, zoom: int) -> GeoDataFrame:
 
 
 def get_cells(tiles: GeoDataFrame, cell_length: float = 10.0) -> tuple[dgpd.GeoDataFrame, int, int]:
-    s, w, n, e = tiles.geometry.iloc[0].bounds
-    rows = math.ceil(
-        abs(s - n) / cell_length
-    )
-    columns = math.ceil(
-        abs(e - w) / cell_length
-    )
+    # s, w, n, e = tiles.geometry.iloc[0].bounds
+    # rows = math.ceil(
+    #     abs(s - n) / cell_length
+    # )
+    # columns = math.ceil(
+    #     abs(e - w) / cell_length
+    # )
+    rows = 256
+    columns = 256
     cells_per_tile = rows * columns
     tile_count = len(tiles)
 
@@ -303,7 +305,7 @@ def run(gdf: GeoDataFrame, zoom: int, max_height: float, outputfolder: str):
 
     warnings.filterwarnings('ignore', '.*empty Series.*')
     meta = dd.utils.make_meta((None, None))
-    warnings.filterwarnings('ignore', '.*empty Series.*')
+    warnings.filterwarnings('warn', '.*empty Series.*')
 
     cells.map_partitions(
         partition_mapping,
