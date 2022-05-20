@@ -1,6 +1,8 @@
 import argparse
 import multiprocessing
+import warnings
 
+warnings.filterwarnings('ignore', '.*Shapely GEOS.*')
 if True:
     # TODO: For some strange reason, importing geopandas before shadow.cutil causes an ImportError
     from shadow.cutil import (
@@ -200,7 +202,6 @@ def get_cells(tiles: GeoDataFrame, cell_length: float = 10.0) -> tuple[dgpd.GeoD
     cpw = tpwr + (dwr * cwr)
     cpe = tpwr + (dwr * cer)
 
-
     tntw = dd.from_dask_array(da.from_array(
         tiles.index.values.repeat(cells_twod),
         chunksize,
@@ -288,12 +289,16 @@ def run(gdf: GeoDataFrame, zoom: int, max_height: float, outputfolder: str):
             * (2 ** 16 - 1)
     )
 
+    warnings.filterwarnings('ignore', '.*empty Series.*')
+    meta = dd.utils.make_meta((None, None))
+    warnings.filterwarnings('ignore', '.*empty Series.*')
+
     cells.map_partitions(
         partition_mapping,
         directory=outputfolder,
         length_cells=length_cells,
         zoom=zoom,
-        meta=(None, None)
+        meta=meta,
     ).compute()
 
 
@@ -387,7 +392,7 @@ if __name__ == '__main__':
                 t = time.time()
                 run(gdf, zoom, max_height, output)
                 dest = os.path.join(output, str(zoom))
-                print(f"{(time.time() - t)/60:.1f}; {input=} {dest=}")
+                print(f"{(time.time() - t) / 60:.1f}; {input=} {dest=}")
     else:
         for gdf, output in zip(gdfs(), args.output):
             for zoom in args.zoom:
