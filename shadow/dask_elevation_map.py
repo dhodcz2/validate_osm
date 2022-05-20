@@ -1,4 +1,5 @@
 import argparse
+from dask.diagnostics import ProgressBar
 import warnings
 
 warnings.filterwarnings('ignore', '.*Shapely GEOS.*')
@@ -396,10 +397,10 @@ if __name__ == '__main__':
     if args.verbose:
         for gdf, output, input in zip(gdfs(), args.output, args.input):
             for zoom in args.zoom:
-                t = time.time()
-                run(gdf, zoom, max_height, output)
                 dest = os.path.join(output, str(zoom))
-                print(f"{(time.time() - t) / 60:.1f}; {input=} {dest=}")
+                print(f"{input=} {dest=}")
+                with ProgressBar():
+                    run(gdf, zoom, max_height, output)
     else:
         for gdf, output in zip(gdfs(), args.output):
             for zoom in args.zoom:
