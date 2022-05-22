@@ -1,4 +1,4 @@
-
+import time
 import warnings
 
 warnings.filterwarnings('ignore', '.*area.*')
@@ -18,6 +18,7 @@ import geopandas as gpd
 
 
 def _get_image(xtile: int, ytile: int, zoom: int, file, max_height: float) -> np.ndarray:
+    t = time.time()
     w, n = num2deg(xtile, ytile, zoom, True)
     e, s = num2deg(xtile + 1, ytile + 1, zoom, True)
     dh = (s - n) / 256
@@ -62,6 +63,7 @@ def _get_image(xtile: int, ytile: int, zoom: int, file, max_height: float) -> np
         rows=256,
         columns=256,
     )
+    print(f"_get_image takes {(time.time() - t)} seconds")
     return image
 
 
@@ -73,14 +75,15 @@ def get_images(
         for xtile, ytile in zip(xtiles, ytiles)
     )
 
-    def func(url, x, y):
-        response = requests.get(url)
+    def func(url, x, y, session: requests.Session):
+        response = session.get(url)
+        # response = requests.get(url)
         response.raise_for_status()
         return io.StringIO(response.text), x, y
 
-    with concurrent.futures.ThreadPoolExecutor() as pool:
+    with concurrent.futures.ThreadPoolExecutor() as pool, requests.Session() as session:
         futures = {
-            pool.submit(func, url, xtile, ytile)
+            pool.submit(func, url, xtile, ytile, session)
             for url, xtile, ytile in zip(urls, xtiles, ytiles)
         }
         results: Iterator[tuple[io.StringIO, int, int]] = (
@@ -107,7 +110,9 @@ def get_image(xtile: int, ytile: int, zoom: int, max_height: float) -> np.ndarra
     if isinstance(xtile, float):
         xtile, ytile = deg2num(xtile, ytile, zoom, True)
     url = f'http://data.osmbuildings.org/0.2/anonymous/tile/{zoom}/{xtile}/{ytile}.json'
+    t = time.time()
     file = io.StringIO(requests.get(url).text)
+    print(f"http request takes {(time.time() - t)} seconds")
     return _get_image(xtile, ytile, zoom, file, max_height)
 
 
