@@ -1,20 +1,15 @@
-import concurrent.futures
-import multiprocessing
-from multiprocessing import cpu_count
-# from multiprocessing import Pool
-import concurrent
 import abc
+import concurrent
+import concurrent.futures
 import functools
 import itertools
-import math
+import multiprocessing
 import os
 import warnings
-from dataclasses import field, dataclass
 from functools import cached_property
 from pathlib import Path
 from typing import Iterator, Iterable
 from typing import Type, Any
-from zipfile import ZipFile
 
 import geopy.distance
 import matplotlib.pyplot as plt
@@ -23,17 +18,11 @@ import pandas as pd
 import pyproj
 import pyximport
 import skimage.io
+from dataclasses import field, dataclass
 from geopandas import GeoDataFrame, GeoSeries
 from pandas import DataFrame
 from pandas import Series
-
-pyximport.install(
-    setup_args={
-        'include_dirs': np.get_include(),
-    },
-    reload_support=True
-)
-import streetview_height.cdistance
+from streetview_height.cutil import cdisplacement, num2deg, deg2num
 
 # TODO: Is Projected entirely pointless?
 from streetview_height.slippy import num2deg, deg2num
@@ -46,6 +35,7 @@ class Points(DataFrame):
 
     def __init__(self, x: Iterable[float], y: Iterable[float], crs=None, **kwargs):
         super(Points, self).__init__({'x': x, 'y': y}, **kwargs)
+        index = pd.MultiIndex()
         super(Points, self).__setattr__('crs', crs)
 
     def __iter__(self) -> Iterator[tuple[float]]:
@@ -179,98 +169,100 @@ class Distance(abc.ABC):
     def _northwest(self) -> StructIterableCoords:
         return StructIterableCoords.from_tiles(self._camera.tiles)
 
+    #
+    # @cached_property
+    # def _displacement(self) -> DataFrame:
+    #     # TODO: implement displacement in Cython
+    #     def displacement() -> Iterator[tuple[float, float]]:
+    #         for camera, tile_displacement, heading, image, northwest, tile, poid in zip(
+    #                 self._camera.projected,
+    #                 self._camera.tiles.displacement,
+    #                 self._heading,
+    #                 self._image,
+    #                 self._northwest.projected,
+    #                 self._camera.tiles,
+    #                 self._poid
+    #         ):
+    #             xlen = tile_displacement[0]
+    #             ylen = tile_displacement[1]
+    #             theta = (450 - heading) % 360
+    #             red = image[:, :, 0]
+    #             slope = math.tan(math.radians(theta))
+    #             buffer = 0
+    #             slope = abs(slope)
+    # 
+    #             ccam = cwall = int(
+    #                 (camera[0] - northwest[0]) / xlen * 255
+    #             )
+    #             rcam = rwall = int(
+    #                 (camera[1] - northwest[1]) / ylen * 255
+    #             )
+    #             # 1 is right, -1 is left
+    #             cinc = 1 if heading < 180 else -1
+    #             # -1 is up, 1 is down
+    #             rinc = -1 if theta < 180 else 1
+    # 
+    #             # Needed: xlen, ylen, image, slope, rcam, ccam, rinc, cinc
+    # 
+    #             if slope > 1:
+    #                 # r >> c
+    #                 slope = 1 / slope
+    #                 while 0 <= cwall <= 255 and 0 <= rwall <= 255:
+    #                     if red[rwall, cwall]:
+    #                         y = (rwall - rcam) / 255 * ylen
+    #                         x = (cwall - ccam) / 255 * xlen
+    #                         cp = streetview_height.cdistance.cdisplacement(
+    #                             image,
+    #                             xlen,
+    #                             ylen,
+    #                             slope,
+    #                             rcam,
+    #                             ccam,
+    #                             rinc,
+    #                             cinc,
+    #                         )
+    #                         yield x, y
+    #                         break
+    #                     elif buffer >= 1:
+    #                         buffer += -1
+    #                         cwall += cinc
+    #                     else:
+    #                         buffer += slope
+    #                         rwall += rinc
+    #                 else:
+    #                     yield np.nan, np.nan
+    #             else:
+    #                 # c >> r
+    #                 while 0 <= cwall <= 255 and 0 <= rwall <= 255:
+    #                     if red[rwall, cwall]:
+    #                         y = (rwall - rcam) / 255 * ylen
+    #                         x = (cwall - ccam) / 255 * xlen
+    #                         cp = streetview_height.cdistance.cdisplacement(
+    #                             image,
+    #                             xlen,
+    #                             ylen,
+    #                             slope,
+    #                             rcam,
+    #                             ccam,
+    #                             rinc,
+    #                             cinc,
+    #                         )
+    #                         yield x, y
+    #                         break
+    #                     elif buffer >= 1:
+    #                         buffer += -1
+    #                         rwall += rinc
+    #                     else:
+    #                         buffer += slope
+    #                         cwall += cinc
+    #                 else:
+    #                     yield np.nan, np.nan
+    # 
+    #     return DataFrame(displacement(), columns=['x', 'y'], index=self._index)
+    # 
+
     @cached_property
-    def _displacement(self) -> DataFrame:
-        # TODO: implement displacement in Cython
-        def displacement() -> Iterator[tuple[float, float]]:
-            for camera, tile_displacement, heading, image, northwest, tile, poid in zip(
-                    self._camera.projected,
-                    self._camera.tiles.displacement,
-                    self._heading,
-                    self._image,
-                    self._northwest.projected,
-                    self._camera.tiles,
-                    self._poid
-            ):
-                xlen = tile_displacement[0]
-                ylen = tile_displacement[1]
-                theta = (450 - heading) % 360
-                red = image[:, :, 0]
-                slope = math.tan(math.radians(theta))
-                buffer = 0
-                slope = abs(slope)
-
-                ccam = cwall = int(
-                    (camera[0] - northwest[0]) / xlen * 255
-                )
-                rcam = rwall = int(
-                    (camera[1] - northwest[1]) / ylen * 255
-                )
-                # 1 is right, -1 is left
-                cinc = 1 if heading < 180 else -1
-                # -1 is up, 1 is down
-                rinc = -1 if theta < 180 else 1
-
-                # Needed: xlen, ylen, image, slope, rcam, ccam, rinc, cinc
-
-                if slope > 1:
-                    # r >> c
-                    slope = 1 / slope
-                    while 0 <= cwall <= 255 and 0 <= rwall <= 255:
-                        if red[rwall, cwall]:
-                            y = (rwall - rcam) / 255 * ylen
-                            x = (cwall - ccam) / 255 * xlen
-                            cp = streetview_height.cdistance.cdisplacement(
-                                image,
-                                xlen,
-                                ylen,
-                                slope,
-                                rcam,
-                                ccam,
-                                rinc,
-                                cinc,
-                            )
-                            yield x, y
-                            break
-                        elif buffer >= 1:
-                            buffer += -1
-                            cwall += cinc
-                        else:
-                            buffer += slope
-                            rwall += rinc
-                    else:
-                        yield np.nan, np.nan
-                else:
-                    # c >> r
-                    while 0 <= cwall <= 255 and 0 <= rwall <= 255:
-                        if red[rwall, cwall]:
-                            y = (rwall - rcam) / 255 * ylen
-                            x = (cwall - ccam) / 255 * xlen
-                            cp = streetview_height.cdistance.cdisplacement(
-                                image,
-                                xlen,
-                                ylen,
-                                slope,
-                                rcam,
-                                ccam,
-                                rinc,
-                                cinc,
-                            )
-                            yield x, y
-                            break
-                        elif buffer >= 1:
-                            buffer += -1
-                            rwall += rinc
-                        else:
-                            buffer += slope
-                            cwall += cinc
-                    else:
-                        yield np.nan, np.nan
-
-        return DataFrame(displacement(), columns=['x', 'y'], index=self._index)
-
-    @cached_property
-    def _cdisplacement(self) -> GeoDataFrame:
+    def _pdisplacement(self) -> GeoDataFrame:
         # We call to iter(images) firstly which takes advantage of the preemptive multiprocessing
         images = iter(self._image)
         camera = self._camera
@@ -291,6 +283,87 @@ class Distance(abc.ABC):
         # slopes = np.tan(np.radians(theta))
         slopes = np.abs(np.tan(np.radians(theta)))
 
+        # 1 is right, -1 is lfet
+        cincs = (
+            1 if b else -1
+            for b in (heading <= 180)
+        )
+        # -1 is up, 1 is down
+        rincs = (
+            -1 if b else 1
+            for b in (theta <= 180)
+        )
+
+        # with requests.Session() as session, concurrent.futures.ThreadPoolExecutor() as te:
+        #     future_url_request = [
+        #         te.submit(self.download, file.url, file.resource, session)
+        #         for file in to_download
+        #     ]
+        #     processes = []
+        #     for future in concurrent.futures.as_completed(future_url_request):
+        #         processes.append(future.result())
+
+        # def gen():
+        #     for image, xlen, ylen, slope, rcam, ccam, rinc, cinc in zip(
+        #             images,
+        #             self._camera.tiles.displacement.x,
+        #             self._camera.tiles.displacement.y,
+        #             slopes,
+        #             rcams,
+        #             ccams,
+        #             rincs,
+        #             cincs
+        #     ):
+        #         yield streetview_height.cdistance.cdisplacement(image, xlen, ylen, slope, rcam, ccam, rinc, cinc)
+
+        def gen():
+            # arguments = zip(
+            #     images,
+            #     self._camera.tiles.displacement.x,
+            #     self._camera.tiles.displacement.y,
+            #     slopes,
+            #     rcams,
+            #     ccams,
+            #     rincs,
+            #     cincs
+            # )
+            with concurrent.futures.ProcessPoolExecutor(8) as pp:
+                yield from pp.map(
+                    cdisplacement,
+                    images,
+                    self._camera.tiles.displacement.x,
+                    self._camera.tiles.displacement.y,
+                    slopes,
+                    rcams,
+                    ccams,
+                    rincs,
+                    cincs,
+                )
+                # yield from pp.map(streetview_height.cdistance.cdisplacement, arguments)
+
+        return DataFrame(gen(), columns=['x', 'y'], index=self._index)
+
+    @cached_property
+    def _displacement(self) -> GeoDataFrame:
+        # We call to iter(images) firstly which takes advantage of the preemptive multiprocessing
+        images = iter(self._image)
+        camera = self._camera
+        northwest = self._northwest.projected
+        heading = self._heading
+
+        ccams: Series = camera.projected.x - northwest.x
+        ccams /= camera.tiles.displacement.x
+        ccams *= 255
+        ccams = ccams.astype('uint16')
+
+        rcams: Series = camera.projected.y - northwest.y
+        rcams /= camera.tiles.displacement.y
+        rcams *= 255
+        rcams = rcams.astype('uint16')
+
+        theta: Series = (450 - heading) % 360
+        # slopes = np.tan(np.radians(theta))
+        slopes = np.abs(np.tan(np.radians(theta)))
 
         # 1 is right, -1 is lfet
         cincs = (
@@ -314,11 +387,9 @@ class Distance(abc.ABC):
                     rincs,
                     cincs
             ):
-                yield streetview_height.cdistance.cdisplacement(image, xlen, ylen, slope, rcam, ccam, rinc, cinc)
+                yield cdisplacement(image, xlen, ylen, slope, rcam, ccam, rinc, cinc)
 
-        # TODO: blackpill is that one of the iterators has a different length
         return DataFrame(gen(), columns=['x', 'y'], index=self._index)
-        # Needed: xlen, ylen, image, slope, rcam, ccam, rinc, cinc
 
     # TODO: small presentation on oak ridge building data
 
@@ -476,27 +547,6 @@ class DescriptorImages:
             yield from past.get()
             past = future
         yield from past.get()
-
-    def _passive(self):
-        cpus = multiprocessing.cpu_count() - 1
-        paths = self._paths
-
-        def batches():
-            while True:
-                try:
-                    path = next(paths)
-                except StopIteration:
-                    return
-                others = (batch for batch, _ in zip(paths, range(5000)))
-                yield path, *others
-
-        # TODO: Instead of reading in response, read proactively
-        # with concurrent.futures.ProcessPoolExecutor(max_workers=cpus + 1) as pool:
-        #     for batch in batches():
-        #         yield from pool.map(skimage.io.imread, batch)
-        pool = multiprocessing.Pool(cpus + 1)
-        for batch in batches():
-            yield from pool.map(skimage.io.imread, batch)
 
 
 class BatchDistance(Distance):

@@ -160,6 +160,7 @@ def get_cells(tiles: GeoDataFrame, cell_length: float = 10.0) -> tuple[dgpd.GeoD
     columns = 256
     cells_per_tile = rows * columns
     tile_count = len(tiles)
+    # TODO: everything 256x256
 
     mb_per_tile = 8 * 8 * cells_per_tile / 1024 / 1024
     tiles_per_chunk = math.floor(75 / mb_per_tile)
