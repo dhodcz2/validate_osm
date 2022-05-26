@@ -168,9 +168,9 @@ def get_cells(tiles: GeoDataFrame, cell_length: float = 10.0) -> tuple[dgpd.GeoD
 
     dh = tiles['h'].values / rows
     dw = tiles['w'].values / columns
-    if rows > 255:
+    if rows > 256:
         raise ValueError(
-            f"{rows=}>255. This means that the image will be downscaled, and cells require more than"
+            f"{rows=}>256. This means that the image will be downscaled, and cells require more than"
             f" uint8. Increase zoom level."
         )
     cn = np.repeat(
@@ -303,10 +303,14 @@ def run(gdf: GeoDataFrame, zoom: int, max_height: float, outputfolder: str):
             / max_height
             * (2 ** 16 - 1)
     )
+    """
+    When generating the elevation maps, we assigned unitless weights to cells with the function:
+    
+    """
 
     warnings.filterwarnings('ignore', '.*empty Series.*')
     meta = dd.utils.make_meta((None, None))
-    warnings.filterwarnings('warn', '.*empty Series.*')
+    warnings.filterwarnings('default', '.*empty Series.*')
 
     cells.map_partitions(
         partition_mapping,
