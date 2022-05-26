@@ -249,6 +249,7 @@ def get_cells(tiles: GeoDataFrame, cell_length: float = 10.0) -> tuple[dgpd.GeoD
 
 
 def partition_mapping(cells: GeoDataFrame, directory: str, rows: int, columns: int, zoom: int, ):
+    # TODO: handle memory limit
     weight: Series = cells.groupby(['tntw', 'cn', 'cw'], sort=False).weight.sum()
     weight: Series = weight.astype(np.uint16)
     groups = weight.groupby('tntw', sort=False).groups
@@ -312,6 +313,7 @@ def run(gdf: GeoDataFrame, zoom: int, max_height: float, outputfolder: str):
     meta = dd.utils.make_meta((None, None))
     warnings.filterwarnings('default', '.*empty Series.*')
 
+    cells = cells[['cn', 'cw', 'weight']]
     cells.map_partitions(
         partition_mapping,
         directory=outputfolder,
@@ -319,6 +321,7 @@ def run(gdf: GeoDataFrame, zoom: int, max_height: float, outputfolder: str):
         columns=columns,
         zoom=zoom,
         meta=meta,
+
     ).compute()
 
 
