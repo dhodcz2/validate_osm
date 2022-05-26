@@ -148,7 +148,7 @@ def get_tiles(gdf: GeoDataFrame, zoom: int) -> GeoDataFrame:
     return tiles
 
 
-def get_cells(tiles: GeoDataFrame, cell_length: float = 10.0) -> tuple[dgpd.GeoDataFrame, int, int]:
+def get_cells(tiles: GeoDataFrame) -> tuple[dgpd.GeoDataFrame, int, int]:
     # s, w, n, e = tiles.geometry.iloc[0].bounds
     # rows = math.ceil(
     #     abs(s - n) / cell_length
@@ -179,11 +179,12 @@ def get_cells(tiles: GeoDataFrame, cell_length: float = 10.0) -> tuple[dgpd.GeoD
     cw = np.tile(
         np.arange(columns, dtype=np.uint8), rows,
     )
+    # This is the cause of the artifacts: cannot store 256 as np.uint8
     cs = np.repeat(
-        np.arange(1, rows + 1, dtype=np.uint8), columns
+        np.arange(1, rows + 1, dtype=np.uint16), columns
     )
     ce = np.tile(
-        np.arange(1, columns + 1, dtype=np.uint8), rows
+        np.arange(1, columns + 1, dtype=np.uint16), rows
     )
     cnr = np.tile(cn, tile_count)
     cwr = np.tile(cw, tile_count)
@@ -291,6 +292,7 @@ def run(gdf: GeoDataFrame, zoom: int, max_height: float, outputfolder: str):
     cells, rows, columns = get_cells(tiles)
 
     cells = cells.sjoin(gdf)
+    # TODO: Is this wasteful? Should I just call .intersection(gdf.loc[cells['index_right'], 'geometry'] ?
     cells = cells.merge(
         gdf[['geometry']], how='left', left_on='index_right', right_index=True, suffixes=('_cells', '_gdf'),
     )
