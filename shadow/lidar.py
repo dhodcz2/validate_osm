@@ -89,21 +89,30 @@ class LidarTiles:
         gdf = GeoDataFrame({
             'href': href,
         }, geometry=geometry, crs=4326, index=index)
-        # gdf['polygon'] = gdf.geometry.to_wkt() + ' / EPSG:4326'
         return gdf
 
-    def write(self, zoom: int, max_height: float, dir: Optional[str] = None):
+    def load(self, zoom: int, max_height: float, dir: Optional[str] = None):
         tiles = self._get_slippy_tiles(zoom)
         union = tiles.unary_union
         catalog = pystac_client.Client.open("https://planetarycomputer.microsoft.com/api/stac/v1")
         search = catalog.search(collections=['3dep-lidar-copc'], intersects=union)
+
         signed: pystac.item_collection.ItemCollection = planetary_computer.sign(search)
-        hrefs = (
+        hrefs = np.fromiter((
             item.assets['data'].href
             for item in signed
-        )
-        polygon = union.wkt + ' / EPSG:4326'
+        ), dtype='U1024')
+        crs = {
+            item.properties['proj:projjson']['components'][0]['id']['code']
+            for item in signed
+        }
+        if len(crs) > 1:
+            raise ValueError(
+                f"The LIDAR partitions have different CRSes. The current code doesn't yet account for this"
+            )
+        crs = crs.pop()
 
+        polygon = union.wkt + ' / EPSG:4326'
         tempdir = os.path.join(tempfile.gettempdir(), str(zoom))
 
         readers = (
@@ -125,10 +134,14 @@ class LidarTiles:
         ])
         tn = tiles.index.get_level_values('tn').values.astype('U10')
         tw = tiles.index.get_level_values('tw').values.astype('U10')
-        it_bounds = np.fromiter((
+        # it_bounds = np.fromiter((
+        #     f'([{minx},{maxx}],[{miny},{maxy}])'
+        #     for minx, miny, maxx, maxy in tiles.bounds.values
+        # ), dtype='U128')
+        it_bounds = [
             f'([{minx},{maxx}],[{miny},{maxy}])'
-            for minx, miny, maxx, maxy in tiles.bounds.values
-        ), dtype='U128')
+            for minx, miny, maxx, maxy in tiles.to_crs(crs).bounds.values
+        ]
 
         zoom_ = str(zoom)
         tempdirs = np.fromiter((
@@ -138,10 +151,12 @@ class LidarTiles:
         with concurrent.futures.ThreadPoolExecutor() as threads:
             threads.map(os.makedirs, tempdirs)
 
-        tempfiles = (
+        # Note to self: don't even bother with iterators when debugging. Once you have it fully implemented, switch
+        #   from [ to (
+        tempfiles = [
             os.path.join(dir, f'{ytile}.tif')
             for dir, ytile in zip(tempdirs, tw)
-        )
+        ]
         writers = (
             pdal.Writer.gdal(
                 output_type='mean',
@@ -156,14 +171,14 @@ class LidarTiles:
         if dir is None:
             dir = os.getcwd()
         dir = os.path.join(dir, zoom_)
-        outdirs = list(
+        outdirs = [
             os.path.join(dir, xtile)
             for xtile in tw
-        )
-        outfiles = list(
+        ]
+        outfiles = [
             os.path.join(outdir, f'{ytile}.png')
             for outdir, ytile in zip(outdirs, tn)
-        )
+        ]
 
         with concurrent.futures.ThreadPoolExecutor() as threads:
             threads.map(os.makedirs, outdirs)
@@ -191,5 +206,5 @@ if __name__ == '__main__':
         *(41.85520272864603, -87.64667114877022)[::-1],
         *(41.886776137830516, -87.62461266183428)[::-1],
     )
-    LidarTiles(box).write(16, 450)
+    LidarTiles(box).load(16, 450)
     print('done')
