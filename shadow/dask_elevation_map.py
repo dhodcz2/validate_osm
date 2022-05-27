@@ -85,8 +85,8 @@ def get_tiles(gdf: GeoDataFrame, zoom: int) -> GeoDataFrame:
     # Convention: repeat rows, tile columns
 
     # Slippy Tiles
-    tn = np.arange(tn, ts, dtype=np.uint)  # xtile goes from n to s
-    tw = np.arange(tw, te, dtype=np.uint)  # ytile goes from w to e
+    tn = np.arange(tn, ts, dtype=np.uint64)  # xtile goes from n to s
+    tw = np.arange(tw, te, dtype=np.uint64)  # ytile goes from w to e
 
     # Geographic
     # Generate from northmost tiles and westmost tiles O(n) instead of all tiles O(n^2)
