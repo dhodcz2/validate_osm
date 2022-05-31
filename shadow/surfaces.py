@@ -16,7 +16,8 @@ import pygeos
 from geopandas import GeoDataFrame
 from geopandas import GeoSeries
 import rasterstats
-from util import  get_utm_from_lon_lat, get_raster_path, get_shadow_image
+# from util import  get_utm_from_lon_lat, get_raster_path, get_shadow_image
+from .util import get_utm_from_lon_lat, get_raster_path, get_shadow_image
 
 warnings.filterwarnings('ignore', '.*PyGEOS.*')
 
@@ -87,6 +88,10 @@ def _(
 class DescriptorParks(osmium.SimpleHandler):
     wkbfab = osmium.geom.WKBFactory()
 
+    @property
+    def raster(self) -> str:
+        return get_raster_path( *self.bbox, self._instance._instance._shadow_dir )
+
     def __init__(self):
         super(DescriptorParks, self).__init__()
         self.natural = {'wood', 'grass'}
@@ -117,7 +122,7 @@ class DescriptorParks(osmium.SimpleHandler):
         if a.from_way():
             self.ways.add(id)
 
-        self.geometry[id] = self.wkbfab.create_multipolygon(a)
+        self.gdf[id] = self.wkbfab.create_multipolygon(a)
         if 'name' in tags:
             self.name[id] = tags['name']
 
@@ -130,8 +135,8 @@ class DescriptorParks(osmium.SimpleHandler):
     def __get__(self, instance: 'Surfaces', owner: Type['_Footprints']) -> GeoDataFrame:
         if instance not in self.cache:
             self.apply_file(instance._file, locations=True)
-            self.cache[instance] = self.get_gdf()
-        return self.cache[instance]
+            self.cache[instance] = self._get_gdf()
+        return self
 
     def __set__(self, instance, value):
         self.cache[instance] = value
@@ -139,9 +144,9 @@ class DescriptorParks(osmium.SimpleHandler):
     def __delete__(self, instance):
         del self.cache[instance]
 
-    def get_gdf(self) -> GeoDataFrame:
-        index = np.fromiter(self.geometry.keys(), dtype=np.uint64, count=len(self.geometry))
-        geometry = GeoSeries.from_wkb(list(self.geometry.values()), index=index)
+    def _get_gdf(self) -> GeoDataFrame:
+        index = np.fromiter(self.gdf.keys(), dtype=np.uint64, count=len(self.gdf))
+        geometry = GeoSeries.from_wkb(list(self.gdf.values()), index=index)
 
         index = np.fromiter(self.name.keys(), dtype=np.uint64, count=len(self.name))
         name = np.fromiter(self.name.values(), dtype='U128', count=len(self.name))
@@ -158,16 +163,21 @@ class DescriptorParks(osmium.SimpleHandler):
             'way': ways,
         }, crs=4326, geometry=geometry)
 
+    @property
+    def gdf(self) -> GeoDataFrame:
+        # TODO:
+        ...
+
+
 
 class DescriptorNetwork:
-    def _rasterstats(self):
-        rasterstats.zonal_stats()
-
     def __get__(self, instance: 'DescriptorNetworks', owner: Type['DescriptorNetworks']):
         self._instance = instance
         if instance not in self._cache:
             osm: pyrosm.OSM = instance._osm[instance._instance]
             nodes, geometry = osm.get_network(self._network_type, None, True)
+            self._bbox[instance] = nodes.total_bounds
+
             nodes: GeoDataFrame
             geometry: GeoDataFrame
             geometry = geometry['id geometry u v length surface'.split()]
@@ -176,15 +186,20 @@ class DescriptorNetwork:
             crs = get_utm_from_lon_lat(lon, lat)
             geometry['geometry'] = (
                 GeoSeries.to_crs(geometry['geometry'], crs)
-                .buffer(4)
-                .to_crs(4326)
+                    .buffer(4)
+                    .to_crs(4326)
             )
             self._cache[instance] = nodes, geometry
         return self
 
+    @property
+    def bbox(self) -> list[float, ...]:
+        return self._bbox[self._instance]
+
     def __init__(self, network_type: str):
         self._network_type = network_type
         self._cache: WeakKeyDictionary[DescriptorNetworks, tuple[GeoDataFrame, GeoDataFrame]] = WeakKeyDictionary()
+        self._bbox: WeakKeyDictionary[DescriptorNetworks, list[float, ...]] = WeakKeyDictionary()
 
     @property
     def geometry(self) -> GeoDataFrame:
@@ -212,6 +227,10 @@ class DescriptorNetwork:
     def nodes(self):
         del self._cache[self._instance]
 
+    @property
+    def raster(self) -> str:
+        return get_raster_path( *self.bbox, self._instance._instance._shadow_dir )
+
 
 class DescriptorNetworks:
     walking = DescriptorNetwork('walking')
@@ -232,8 +251,6 @@ class DescriptorNetworks:
         return self
 
 
-
-
 class Surfaces:
     parks = DescriptorParks()
     networks = DescriptorNetworks()
@@ -241,13 +258,6 @@ class Surfaces:
     def __init__(self, file: str, shadow_dir: str):
         self._file = file
         self._shadow_dir = shadow_dir
-
-
-
-
-
-
-
 
 
 if __name__ == '__main__':
