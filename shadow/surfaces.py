@@ -192,7 +192,6 @@ class DescriptorParks(osmium.SimpleHandler):
             basedir=shadow_dir,
         )
 
-        t = time.time()
         step = math.ceil(len(gdf) / multiprocessing.cpu_count())
         slices = (
             slice(l, l + step)
@@ -205,13 +204,6 @@ class DescriptorParks(osmium.SimpleHandler):
         with concurrent.futures.ProcessPoolExecutor() as processes:
             substats = processes.map(cls.sum, interfaces, itertools.repeat(raster))
         sum = np.fromiter(itertools.chain.from_iterable(substats), dtype=np.float64, count=len(gdf))
-        print(f'{time.time()-t} for parallel')
-        t = time.time()
-        _sum = np.fromiter((
-            stats['sum']
-            for stats in rasterstats.gen_zonal_stats(gdf, raster, stats='sum')
-        ), dtype=np.float64, count=len(gdf))
-        print(f'{t-time.time()} for serial')
 
         result = GeoDataFrame({
             'name': gdf['name'].values,
@@ -223,12 +215,15 @@ class DescriptorParks(osmium.SimpleHandler):
     @rasterstats_from_file.register(list)
     @classmethod
     def _(cls, files: list[str], shadow_dir: str, zoom: int) -> DataFrame:
-        it_stats = concurrent.futures.ProcessPoolExecutor().map(
-            DescriptorParks.rasterstats_from_file,
-            files,
-            itertools.repeat(shadow_dir),
-            itertools.repeat(zoom),
-        )
+
+        #
+        # it_stats = concurrent.futures.ProcessPoolExecutor().map(
+        #     DescriptorParks.rasterstats_from_file,
+        #     files,
+        #     itertools.repeat(shadow_dir),
+        #     itertools.repeat(zoom),
+        # )
+        # TODO: Use concurrent.futures.threadpool.submit to only get one dataframe ahead at a time
         sources = (
             file.rpartition('/')[2]
             for file in files
@@ -238,18 +233,16 @@ class DescriptorParks(osmium.SimpleHandler):
             source.rpartition('.')[0]
             for source in sources
         )
-        it_stats = (
-            stats.assign(name=name)
-            for stats, name in zip(it_stats, sources)
-        )
-        result = pd.concat(
-            it_stats,
-            axis=0,
-            names='name area sum'.split(),
-            sort=False,
-        )
-        return result
 
+
+        # result = pd.concat(
+        #     it_stats,
+        #     axis=0,
+        #     names='name area sum'.split(),
+        #     sort=False,
+        # )
+        # return result
+        #
 
 class DescriptorNetwork:
     network_type: str
