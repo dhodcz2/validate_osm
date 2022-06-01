@@ -16,7 +16,6 @@ from geopandas import GeoDataFrame
 from geopandas import GeoSeries
 from pandas import Series, DataFrame
 
-
 warnings.filterwarnings('ignore', '.*PyGEOS.*')
 
 import osmium
@@ -215,9 +214,9 @@ class DescriptorParks(osmium.SimpleHandler):
         sum = pd.Series(sum, index=geometry.index)
 
         result = GeoDataFrame({
-            'name': gdf['name'].values,
+            'name': gdf['name'],
             'sum': sum,
-        }, index=gdf.index, crs=gdf.crs, geometry=gdf['geometry'].values)
+        }, index=gdf.index, crs=gdf.crs, geometry=geometry)
         result['sum'] = pd.Series.astype(result['sum'], 'UInt32')
         result['name'] = Series.astype(result['name'], 'string')
         return result
@@ -320,10 +319,10 @@ class DescriptorNetwork:
         sum = Series(sum, index=geometry.index)
 
         result = GeoDataFrame({
-            'name': gdf['name'].values,
+            'name': gdf['name'],
             'sum': sum,
             'length': gdf['length'].values,
-        }, index=gdf.index, crs=gdf.crs, geometry=gdf['geometry'].values)
+        }, index=gdf.index, crs=gdf.crs, geometry=geometry)
         result['sum'] = Series.astype(result['sum'], 'UInt32')
         result['name'] = Series.astype(result['name'], 'string')
         return result
