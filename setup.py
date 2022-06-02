@@ -1,10 +1,10 @@
+
+from setuptools import dist
+dist.Distribution().fetch_build_eggs(['Cython>=0.15.1', 'numpy>=1.10'])
 from Cython.Build import cythonize
 import warnings
-warnings.warn('you gotta install numpy before this. im too tired to resolve this issue')
 from pathlib import Path
 import numpy
-# from Cython.Build import cythonize
-# from setuptools import Extension
 from setuptools import find_packages
 from setuptools import setup
 
