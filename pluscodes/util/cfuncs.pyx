@@ -28,7 +28,6 @@ cdef extern from '<globals.h>':
     unsigned long FINAL_LAT_PRECISION
     unsigned long FINAL_LON_PRECISION
     unsigned int MIN_TRIMMABLE_CODE_LEN
-    int DEBUG
 
 np.string_t = np.dtype('S%d' % (MAX_DIGITS + 1))
 ctypedef np.uint8_t UINT8
@@ -52,34 +51,42 @@ if False | False:
 cdef  _encode_string(
         unsigned long[:] ix,
         unsigned long[:] iy,
-        unsigned long[:] lengths,
+        unsigned long[:] code_lengths,
 ):
     cdef char* string = <char *> malloc((MAX_DIGITS + 1) * sizeof(char))
     cdef unsigned long length = ix.size
     cdef const char* alphabet = ALPHABET
-    cdef unsigned char strlen = MAX_DIGITS + 1
-    codes = np.ndarray(shape=(length,), dtype='U%d' % strlen)
+    codes = np.ndarray(shape=(length,), dtype='U%d' % (MAX_DIGITS+1))
+    # codes = np.ndarray(shape=(length,MAX_DIGITS+1), dtype=np.uint8)
     cdef unsigned long x
     cdef unsigned long y
     cdef unsigned int i
     cdef unsigned char c
+    cdef ssize_t strlen
 
-    for i in range(ix.size):
+
+    for i in range(length):
         x = ix[i]
         y = iy[i]
-        length = lengths[i]
+        strlen = code_lengths[i]
 
         for c in range(MAX_DIGITS, PAIR_LENGTH, -1):
             string[c] = alphabet[
                 y % GRID_ROWS * GRID_COLUMNS
                 + x % GRID_COLUMNS
             ]
+            # codes[i, c] = (
+            #     y % GRID_ROWS * GRID_COLUMNS
+            #     + x % GRID_COLUMNS
+            # )
             x //= GRID_COLUMNS
             y //= GRID_ROWS
 
-        for c in range(PAIR_LENGTH, SEP, -2):
+        for c in range(PAIR_LENGTH, SEP_POS, -2):
             string[c] = alphabet[ x % BASE ]
             string[c-1] = alphabet[ y % BASE ]
+            # codes[i, c] = x % BASE
+            # codes[i, c-1] = y % BASE
             x //= BASE
             y //= BASE
 
@@ -88,13 +95,14 @@ cdef  _encode_string(
         for c in range(SEP_POS-1, 0, -2):
             string[c] = alphabet[ x % BASE ]
             string[c-1] = alphabet[ y % BASE ]
+            # codes[i, c] = x % BASE
+            # codes[i, c-1] = y % BASE
             x //= BASE
             y //= BASE
 
-        codes[i] = string[:MAX_DIGITS].decode('UTF-8')
+        codes[i] = string[:strlen].decode('utf-8')
 
     free(string)
-    codes = np.ndarray(dtype=np.uint8)
     return codes
 
 def encode_string(
@@ -226,3 +234,27 @@ def decode_digits(
 #
 # def decode_strings( strings: NDArray[STRING], ) -> NDArray[np.uint8]:
 #     return _decode_strings(strings)
+
+cdef np.ndarray[F64, ndim=2] _encode_bounds(
+        unsigned long[:] ix,
+        unsigned long[:] iy,
+        unsigned char[:] lengths,
+):
+    cdef float [:, ::1] bounds = np.ndarray(shape=(ix.size, 2), dtype=np.float64)
+    cdef Py_ssize_t r
+    cdef double x, y
+
+    for r in range(ix.size):
+        x = (ix / FINAL_LON_PRECISION) - MAX_LON
+        y = (iy / FINAL_LAT_PRECISION) - MAX_LAT
+
+cdef np.ndarray[F64, ndim=2] _decode_bounds(
+        float[:,::1] bounds,
+):
+    ...
+
+
+
+
+    # TODO: Use a contingent array
+    ...
