@@ -19,7 +19,7 @@ cdef extern from '<globals.h>':
     unsigned int MAX_LON
     unsigned int MAX_DIGITS
     unsigned int PAIR_LENGTH
-    unsigned int PAIR_FIRST_VALUE
+    unsigned int PAIR_PRECISION_FIRST_VALUE
     unsigned long PAIR_PRECISION
     unsigned int GRID_LENGTH
     unsigned int GRID_COLUMNS
@@ -49,12 +49,12 @@ if False | False:
 @cython.wraparound(False)
 @cython.nonecheck(False)
 cdef  _encode_string(
-        unsigned long[:] ix,
-        unsigned long[:] iy,
+        unsigned long[:] fx,
+        unsigned long[:] fy,
         unsigned long[:] code_lengths,
 ):
     cdef char* string = <char *> malloc((MAX_DIGITS + 1) * sizeof(char))
-    cdef unsigned long length = ix.size
+    cdef unsigned long length = fx.size
     cdef const char* alphabet = ALPHABET
     codes = np.ndarray(shape=(length,), dtype='U%d' % (MAX_DIGITS+1))
     # codes = np.ndarray(shape=(length,MAX_DIGITS+1), dtype=np.uint8)
@@ -66,8 +66,8 @@ cdef  _encode_string(
 
 
     for i in range(length):
-        x = ix[i]
-        y = iy[i]
+        x = fx[i]
+        y = fy[i]
         strlen = code_lengths[i]
 
         for c in range(MAX_DIGITS, PAIR_LENGTH, -1):
@@ -106,32 +106,32 @@ cdef  _encode_string(
     return codes
 
 def encode_string(
-        ix: NDArray[np.uint64],
-        iy: NDArray[np.uint64],
+        fx: NDArray[np.uint64],
+        fy: NDArray[np.uint64],
         lengths: NDArray[np.uint8] = None,
 ) -> NDArray[np.string_t]:
     """
 
-    :param ix:
-    :param iy:
+    :param fx:
+    :param fy:
     :param lengths:
     :return:
     """
     if lengths is None:
-        lengths = np.full(len(ix), MAX_DIGITS + 1, dtype=np.uint8)
-    if not len(ix) == len(iy) == len(lengths):
+        lengths = np.full(len(fx), MAX_DIGITS + 1, dtype=np.uint8)
+    if not len(fx) == len(fy) == len(lengths):
         raise ValueError('invalid lengths')
-    return _encode_string(ix, iy, lengths)
+    return _encode_string(fx, fy, lengths)
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.nonecheck(False)
 cdef np.ndarray[UINT8, ndim=2] _encode_digits(
-        unsigned long[:] ix,
-        unsigned long[:] iy,
+        unsigned long[:] fx,
+        unsigned long[:] fy,
         unsigned long[:] lengths,
 ):
-    cdef Py_ssize_t length = ix.size
+    cdef Py_ssize_t length = fx.size
     cdef Py_ssize_t row
     cdef np.ndarray[UINT8, ndim=2] digits = np.ndarray(shape=(length, MAX_DIGITS), dtype=np.uint8)
     cdef unsigned char[:,:] dv = digits
@@ -140,8 +140,8 @@ cdef np.ndarray[UINT8, ndim=2] _encode_digits(
     cdef unsigned char c
 
     for r in range(length):
-        y = iy[r]
-        x = ix[r]
+        y = fy[r]
+        x = fx[r]
 
         for c in range(MAX_DIGITS-1, PAIR_LENGTH-1, -1):
             dv[r,c] = (
@@ -162,22 +162,22 @@ cdef np.ndarray[UINT8, ndim=2] _encode_digits(
 
 
 def encode_digits(
-        ix: NDArray[np.uint64],
-        iy: NDArray[np.uint64],
+        fx: NDArray[np.uint64],
+        fy: NDArray[np.uint64],
         lengths: NDArray[np.uint8] = None,
 ) -> NDArray[np.uint8]:
     """
 
-    :param ix:
-    :param iy:
+    :param fx:
+    :param fy:
     :param lengths:
     :return:
     """
     if lengths is None:
-        lengths = np.full(len(ix), MAX_DIGITS + 1, dtype=np.uint8)
-    if not len(ix) == len(iy) == len(lengths):
+        lengths = np.full(len(fx), MAX_DIGITS + 1, dtype=np.uint8)
+    if not len(fx) == len(fy) == len(lengths):
         raise ValueError('invalid lengths')
-    return _encode_digits(ix, iy, lengths)
+    return _encode_digits(fx, fy, lengths)
 
 cdef np.ndarray[UINT64, ndim=2] _decode_digits(
         unsigned char[:,:] digits,
@@ -185,8 +185,8 @@ cdef np.ndarray[UINT64, ndim=2] _decode_digits(
 ):
     cdef Py_ssize_t length = digits.shape[0]
     cdef Py_ssize_t r
-    cdef np.ndarray[UINT64, ndim=2] ix = np.ndarray(shape=(length,), dtype=np.uint64)
-    cdef np.ndarray[UINT64, ndim=2] iy = np.ndarray(shape=(length,), dtype=np.uint64)
+    cdef np.ndarray[UINT64, ndim=2] fx = np.ndarray(shape=(length,), dtype=np.uint64)
+    cdef np.ndarray[UINT64, ndim=2] fy = np.ndarray(shape=(length,), dtype=np.uint64)
     cdef unsigned long x
     cdef unsigned long y
     cdef unsigned char c
@@ -208,53 +208,75 @@ def decode_digits(
         raise ValueError('invalid lengths')
     return _decode_digits(digits, lengths)
 
-# cdef NDArray[np.uint8] _decode_strings(
-#         unsigned char[:,::1] strings,
-# ):
-#     cdef Py_ssize_t length = strings.shape[0]
-#     cdef Py_ssize_t r
-#     cdef np.ndarray[UINT64, ndim=2] ix = np.ndarray(shape=(length,), dtype=np.uint64)
-#     cdef np.ndarray[UINT64, ndim=2] iy = np.ndarray(shape=(length,), dtype=np.uint64)
-#     cdef unsigned long x
-#     cdef unsigned long y
-#     cdef unsigned char c
-#
-#     for r in range(length):
-#         y = 0
-#         x = 0
-#         for c in range(PAIR_LENGTH):
-#             # y += ALPHABET * BASE ** (PAIR_LENGTH - c - 1)
-#             # x += alphabet.index(strings[r,c+PAIR_LENGTH]) * BASE ** (PAIR_LENGTH - c - 1)
-#         ix[r] = x
-#         iy[r] = y
-#
-#
-#     return ix, iy
-#
-#
-# def decode_strings( strings: NDArray[STRING], ) -> NDArray[np.uint8]:
-#     return _decode_strings(strings)
-
 cdef np.ndarray[F64, ndim=2] _encode_bounds(
-        unsigned long[:] ix,
-        unsigned long[:] iy,
-        unsigned char[:] lengths,
+        unsigned long[:] fx,
+        unsigned long[:] fy,
+        unsigned char[:] px,
+        unsigned char[:] py,
 ):
-    cdef float [:, ::1] bounds = np.ndarray(shape=(ix.size, 2), dtype=np.float64)
+    cdef float [:, ::1] bounds = np.ndarray(shape=(fx.size, 4), dtype=np.float64)
     cdef Py_ssize_t r
-    cdef double x, y
+    cdef float w, s, n, e
 
-    for r in range(ix.size):
-        x = (ix / FINAL_LON_PRECISION) - MAX_LON
-        y = (iy / FINAL_LAT_PRECISION) - MAX_LAT
+    cdef const unsigned long row_sizes[GRID_LENGTH]
+    cdef const unsigned long col_sizes[GRID_LENGTH]
+    cdef const unsigned long pair_sizes[PAIR_LENGTH]
 
-cdef np.ndarray[F64, ndim=2] _decode_bounds(
-        float[:,::1] bounds,
+    for r in range(fx.size):
+        w = <float> fx[r] / FINAL_LON_PRECISION - MAX_LON
+        s = <float> fy[r] / FINAL_LAT_PRECISION - MAX_LAT
+        e = <float> px[r] / FINAL_LON_PRECISION + w
+        n = <float> py[r] / FINAL_LAT_PRECISION + s
+
+        bounds[r, 0] = w
+        bounds[r, 1] = s
+        bounds[r, 2] = e
+        bounds[r, 3] = n
+
+    return bounds
+
+def encode_bounds(
+        fx: NDArray[np.uint64],
+        fy: NDArray[np.uint64],
+        px: NDArray[np.uint64],
+        py: NDArray[np.uint64],
+) -> NDArray[np.float64]:
+    """
+
+    :param fx:  finest precision integer longitude
+    :param fy:  finest precision integer latitude
+    :param px:
+    :param py:
+    :return:
+    """
+    if not len(fx) == len(fy) == len(px) == len(py):
+        raise ValueError('invalid lengths')
+    return _encode_bounds(fx, fy, px, py)
+
+cdef np.ndarray[UINT8, ndim=1] _suggest_lengths(
+        float [:, ::1] w,
+        float [:, ::1] s,
+        float [:, ::1] e,
+        float [:, ::1] n,
+        bint contains,
 ):
     ...
 
 
+def suggest_lengths(
+        w: NDArray[np.float64],
+        s: NDArray[np.float64],
+        e: NDArray[np.float64],
+        n: NDArray[np.float64],
+        contains: bool = True
+) -> NDArray[np.uint8]:
+    """
 
-
-    # TODO: Use a contingent array
-    ...
+    :param w:
+    :param s:
+    :param e:
+    :param n:
+    :param contains:
+    :return:
+    """
+    return _suggest_lengths(w, s, e, n, contains)
