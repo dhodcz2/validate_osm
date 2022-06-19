@@ -1,9 +1,13 @@
+print('wtf')
+import os
+
 import numpy as np
 cimport numpy as np
 from numpy.typing import NDArray
-cimport cfuncs
+print(os.getcwd())
+from . cimport cfuncs
 
-cdef extern from '<globals.h>':
+cdef extern from '<util/globals.h>':
     char SEP
     unsigned int SEP_POS
     char * ALPHABET

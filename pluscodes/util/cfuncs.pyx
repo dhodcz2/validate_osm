@@ -3,12 +3,10 @@ cimport cython
 from libc.stdlib cimport malloc
 from libc.stdlib cimport free
 
-from numpy.typing import NDArray
-
 import numpy as np
 cimport numpy as np
 
-cdef extern from '<globals.h>':
+cdef extern from '<./util/globals.h>':
     char SEP
     unsigned int SEP_POS
     char* ALPHABET
@@ -198,7 +196,7 @@ cdef  np.ndarray[UINT64, ndim=2] get_claim(
     ls += 1
 
     cdef np.ndarray[UINT64, ndim=2] claim = np.ndarray(shape=(length,2), dtype=np.uint64)
-    cdef unsigned long[:] cv = claim
+    cdef unsigned long[:, :] cv = claim
 
     cdef unsigned int repeat = len(range(lw, le))
     cdef unsigned int tile = len(range(ls, ln))
@@ -231,7 +229,7 @@ cdef  np.ndarray[F64, ndim=2] get_bounds(
     unsigned char[:] lengths,
 ):
     cdef np.ndarray[F64, ndim=2] bounds = np.ndarray(shape=(lx.size, 4), dtype=np.float64)
-    cdef double[:] bv = bounds
+    cdef double[:, :] bv = bounds
     cdef Py_ssize_t r
 
     for r in range(lx.size):
