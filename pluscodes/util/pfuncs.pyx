@@ -3,7 +3,6 @@ cimport numpy as np
 from numpy.typing import NDArray
 cimport cfuncs
 
-
 cdef extern from '<globals.h>':
     char SEP
     unsigned int SEP_POS
