@@ -123,7 +123,7 @@ cdef  np.ndarray get_strings(
             x //= BASE
             y //= BASE
 
-        codes[i] = string[:strlen].decode('utf-8')
+        codes[i] = string[:strlen+1].decode('utf-8')
 
     free(string)
     return codes
@@ -198,11 +198,12 @@ cdef  np.ndarray[UINT64, ndim=2] get_claim(
     ls += 1
 
     cdef np.ndarray[UINT64, ndim=2] claim = np.ndarray(shape=(length,2), dtype=np.uint64)
+    cdef unsigned long[:] cv = claim
 
     cdef unsigned int repeat = len(range(lw, le))
     cdef unsigned int tile = len(range(ls, ln))
-    claim[:, 0] = np.repeat(range(lw, le), repeat)
-    claim[:, 1] = np.tile(range(ls, ln), tile)
+    cv[:, 0] = np.repeat(range(lw, le), repeat)
+    cv[:, 1] = np.tile(range(ls, ln), tile)
 
     return claim
 
@@ -213,31 +214,29 @@ cdef get_bound(
     unsigned long ly,
     unsigned char length,
 ):
-    cdef double fw = <double>(lx) / FINAL_LON_PRECISION
-    cdef double fs = <double>(ly) / FINAL_LAT_PRECISION
+    cdef double fw = <double>lx / FINAL_LON_PRECISION
+    cdef double fs = <double>ly / FINAL_LAT_PRECISION
     cdef double fe = fw
     cdef double fn = fs
     fn += GRID_SIZE_DEGREES / math.pow(GRID_ROWS, length-PAIR_LENGTH)
     fe += GRID_SIZE_DEGREES / math.pow(GRID_COLUMNS, length-PAIR_LENGTH)
-    return (fw, fs, fe, fn)
+    return fw, fs, fe, fn
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.nonecheck(False)
 cdef  np.ndarray[F64, ndim=2] get_bounds(
-    # np.ndarray[UINT64, ndim=1] lx,
-    # np.ndarray[UINT64, ndim=1] ly,
     unsigned long[:] lx,
     unsigned long[:] ly,
     unsigned char[:] lengths,
 ):
     cdef np.ndarray[F64, ndim=2] bounds = np.ndarray(shape=(lx.size, 4), dtype=np.float64)
+    cdef double[:] bv = bounds
     cdef Py_ssize_t r
 
-
     for r in range(lx.size):
-        bounds[r, 0] = lx[r] / FINAL_LON_PRECISION
-        bounds[r, 1] = ly[r] / FINAL_LAT_PRECISION
-        bounds[r, 2] = bounds[r, 0] + GRID_SIZE_DEGREES / math.pow(GRID_ROWS, lengths[r]-PAIR_LENGTH)
-        bounds[r, 3] = bounds[r, 1] + GRID_SIZE_DEGREES / math.pow(GRID_COLUMNS, lengths[r]-PAIR_LENGTH)
+        bv[r, 0] = lx[r] / FINAL_LON_PRECISION
+        bv[r, 1] = ly[r] / FINAL_LAT_PRECISION
+        bv[r, 2] = bv[r, 0] + GRID_SIZE_DEGREES / math.pow(GRID_ROWS, lengths[r]-PAIR_LENGTH)
+        bv[r, 3] = bv[r, 1] + GRID_SIZE_DEGREES / math.pow(GRID_COLUMNS, lengths[r]-PAIR_LENGTH)
     return bounds
