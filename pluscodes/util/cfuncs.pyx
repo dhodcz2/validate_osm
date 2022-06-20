@@ -6,7 +6,7 @@ from libc.stdlib cimport free
 import numpy as np
 cimport numpy as np
 
-cdef extern from '<./util/globals.h>':
+cdef extern from '<util/globals.h>':
     char SEP
     unsigned int SEP_POS
     char* ALPHABET
@@ -44,7 +44,7 @@ cdef get_string(
         unsigned long ly,
         unsigned char length,
 ):
-    cdef char* string = <char *> malloc(length * sizeof(char))
+    cdef char* string = <char *> malloc((MAX_DIGITS+1) * sizeof(char))
     cdef unsigned char c
     cdef const char* alphabet = ALPHABET
     cdef str s
@@ -99,7 +99,7 @@ cdef  np.ndarray get_strings(
         y = ly[i]
         strlen = lengths[i]
 
-        for c in range(MAX_DIGITS, PAIR_LENGTH+1, -1):
+        for c in range(MAX_DIGITS, PAIR_LENGTH, -1):
             string[c] = alphabet[
                 y % GRID_ROWS * GRID_COLUMNS
                 + x % GRID_COLUMNS
@@ -107,7 +107,7 @@ cdef  np.ndarray get_strings(
             x //= GRID_COLUMNS
             y //= GRID_ROWS
 
-        for c in range(PAIR_LENGTH+1, SEP_POS, -2):
+        for c in range(PAIR_LENGTH, SEP_POS, -2):
             string[c] = alphabet[ x % BASE ]
             string[c-1] = alphabet[ y % BASE ]
             x //= BASE
@@ -115,7 +115,7 @@ cdef  np.ndarray get_strings(
 
         string[SEP_POS] = SEP
 
-        for c in range(SEP_POS-1, 0, -2):
+        for c in range(SEP_POS-1, -1, -2):
             string[c] = alphabet[ x % BASE ]
             string[c-1] = alphabet[ y % BASE ]
             x //= BASE
@@ -161,13 +161,18 @@ cdef  np.ndarray[UINT8, ndim=1] get_lengths(
         double[:] fe,
         double[:] fn,
 ):
-    cdef unsigned char[:] lengths = np.ndarray(shape=(fw.size,), dtype=np.uint8)
+    cdef np.ndarray[UINT8, ndim=1] lengths = np.ndarray(shape=(fw.size,), dtype=np.uint8)
+    cdef unsigned char[:] lv = lengths
+    # cdef unsigned char[:] lengths = np.ndarray(shape=(fw.size,), dtype=np.uint8)
 
     cdef Py_ssize_t r
-    for r in range(fw.size):
-        lengths[r] = get_length(fw[r], fs[r], fe[r], fn[r], )
+    for r in range(fw.shape[0]):
+        lv[r] = get_length(fw[r], fs[r], fe[r], fn[r], )
     return lengths
 
+# @cython.boundscheck(False)
+# @cython.wraparound(False)
+# @cython.nonecheck(False)
 cdef  np.ndarray[UINT64, ndim=2] get_claim(
     double fw,
     double fs,
@@ -175,33 +180,32 @@ cdef  np.ndarray[UINT64, ndim=2] get_claim(
     double fn,
     unsigned char length,
 ):
-    fw = (fw + MAX_LON) * FINAL_LON_PRECISION
-    fe = (fe + MAX_LON) * FINAL_LON_PRECISION
-    fs = (fs + MAX_LAT) * FINAL_LAT_PRECISION
-    fn = (fn + MAX_LAT) * FINAL_LAT_PRECISION
-    cdef unsigned long lw = <unsigned long> fw
-    cdef unsigned long le = <unsigned long> fe
-    cdef unsigned long ls = <unsigned long> fs
-    cdef unsigned long ln = <unsigned long> fn
+    cdef unsigned long lw = <unsigned long> ((fw + MAX_LON) * FINAL_LON_PRECISION)
+    cdef unsigned long le = <unsigned long> ((fe + MAX_LON) * FINAL_LON_PRECISION)
+    cdef unsigned long ls = <unsigned long> ((fs + MAX_LAT) * FINAL_LAT_PRECISION)
+    cdef unsigned long ln = <unsigned long> ( (fn + MAX_LAT) * FINAL_LAT_PRECISION)
 
-    cdef unsigned char trim_rows = pow(GRID_ROWS, MAX_DIGITS - length)
-    cdef unsigned char trim_cols = pow(GRID_COLUMNS, MAX_DIGITS - length)
+    cdef unsigned long xstep = pow(GRID_COLUMNS, MAX_DIGITS - length)
+    cdef unsigned long ystep = pow(GRID_ROWS, MAX_DIGITS - length)
+    cdef unsigned long dx = le // xstep - lw // xstep
+    cdef unsigned long dy = ln // ystep - ls // ystep
 
-    lw //= trim_cols
-    le //= trim_cols
-    ln //= trim_rows
-    ls //= trim_rows
+    # (leftmost long, rightmost long), (topmost long, bottommost long) exclusive
+    cdef np.ndarray[UINT64, ndim=1] lx = np.arange(xstep, dx*xstep, xstep, dtype=np.uint64)
+    cdef np.ndarray[UINT64, ndim=1] ly = np.arange(ystep, dy*ystep, ystep, dtype=np.uint64)
 
-    lw += 1
-    ls += 1
+    dx -= 1
+    dy -= 1
 
-    cdef np.ndarray[UINT64, ndim=2] claim = np.ndarray(shape=(length,2), dtype=np.uint64)
+    cdef np.ndarray[UINT64, ndim=2] claim = np.ndarray(shape=(dx*dy, 2 ), dtype=np.uint64)
     cdef unsigned long[:, :] cv = claim
-
-    cdef unsigned int repeat = len(range(lw, le))
-    cdef unsigned int tile = len(range(ls, ln))
-    cv[:, 0] = np.repeat(range(lw, le), repeat)
-    cv[:, 1] = np.tile(range(ls, ln), tile)
+    cdef unsigned long i
+    cdef unsigned long j
+    print(dx, dy)
+    for i in range(dy):
+        for j in range(dx):
+            cv[i*dx+j, 0] = lx[j] + lw
+            cv[i*dx+j, 1] = ly[i] + ls
 
     return claim
 
