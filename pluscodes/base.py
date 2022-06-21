@@ -1,3 +1,6 @@
+import functools
+import folium
+
 import geopandas as gpd
 import pygeos.creation
 
@@ -9,6 +12,7 @@ import pandas as pd
 from geopandas import GeoSeries
 from numpy.typing import NDArray
 from pluscodes.util import *
+
 
 class DescriptorLoc:
     def __get__(self, instance: 'PlusCodes', owner):
@@ -62,7 +66,19 @@ class DescriptorCx:
         footprints = pc.footprints.cx[item]
         heads = pc.heads.loc[idx[footprints.index, :]]
         claims = pc.claims.loc[idx[footprints.index, :, :]]
-        return PlusCodes(heads, footprints, claims)
+        return PlusCodes(
+            footprints=footprints,
+            heads=heads,
+            claims=claims
+        )
+        # return PlusCodes(heads, footprints, claims)
+
+    def latlon(self, miny, minx, maxy, maxx) -> 'PlusCodes':
+        item = (
+            slice(minx, maxx),
+            slice(miny, maxy)
+        )
+        return self.__getitem__(item)
 
 
 class PlusCodes:
@@ -75,17 +91,35 @@ class PlusCodes:
         self.heads = heads
         self.claims = claims
 
+    def __len__(self):
+        return len(self.footprints)
+
+    @functools.cached_property
+    def _total_bounds(self):
+        return self.footprints.total_bounds
+
+    def __repr__(self):
+        bounds = ', '.join(
+            str(val)
+            for val in self.footprints.total_bounds.round(2)
+        )
+        return f'{self.__class__.__qualname__}[{bounds}]'
+
     @classmethod
     def from_footprints(cls, footprints: GeoSeries | GeoDataFrame):
         footprints = footprints.geometry.to_crs(epsg=4326)
         footprints = footprints.reset_index(drop=True)
+        footprints.index.name = 'footprint'
+        footprints: GeoDataFrame
+
         fw, fs, fe, fn = footprints.bounds.T.values
 
         # heads
         lengths = get_lengths(fw, fs, fe, fn)
-        fx = (fe + fw) / 2
-        fy = (fn + fs) / 2
-        heads = get_strings(x=fx, y=fy, lengths=lengths, )
+        points = footprints.representative_point()
+        fx = points.x.values
+        fy = points.y.values
+        heads = get_strings(x=fx, y=fy, lengths=lengths)
         index = pd.MultiIndex.from_arrays((
             np.arange(len(footprints)),
             heads,
@@ -120,6 +154,7 @@ class PlusCodes:
             bounds[:, 0], bounds[:, 1], bounds[:, 2], bounds[:, 3]
         )
         claims = GeoSeries(geometry, index=index, crs=4326)
+        # TODO: in the morning, graphically investigate and implement pytest
 
         return cls(
             footprints=footprints,
@@ -157,12 +192,45 @@ class PlusCodes:
             raise ValueError(f'{level} is not supported')
         return PlusCodes(footprints, heads, claims)
 
-    def explore(self, *args, **kwargs) -> None:
-        ...
+    def explore(self, **kwargs) -> None:
+        centroid = self.footprints.iloc[0].centroid
+        map = folium.Map(location=(centroid.y, centroid.x))
+        footprints: GeoSeries = self.footprints
+        footprints: GeoDataFrame = GeoDataFrame({
+            # 'footprint': footprints.index.get_level_values('footprint'),
+        }, geometry=footprints.geometry, crs=4326, index=footprints.index)
+
+        heads: GeoSeries = self.heads
+        heads: GeoDataFrame = GeoDataFrame({
+            'head': heads.index.get_level_values('head'),
+        }, geometry=heads.geometry, crs=4326, index=heads.index)
+
+        claims: GeoSeries = self.claims
+        claims: GeoDataFrame = GeoDataFrame({
+            'claim': claims.index.get_level_values('claim'),
+        }, geometry=claims.geometry, crs=4326, index=claims.index)
+        loc = claims.index.get_level_values('claim') != claims.index.get_level_values('head')
+        claims = claims.loc[loc]
+
+        footprints.explore(
+            m=map,
+            color='black',
+            style_kwds=dict(
+                fill=False,
+            )
+        )
+        heads.explore(
+            m=map,
+            color='blue',
+        )
+        claims.explore(
+            m=map,
+            color='red',
+        )
+        return map
 
 
 
 if __name__ == '__main__':
     pc = PlusCodes.from_file('/home/arstneio/Downloads/chicago.feather')
     print()
-
