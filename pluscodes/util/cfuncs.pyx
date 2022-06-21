@@ -28,6 +28,9 @@ cdef extern from '<util/globals.h>':
     unsigned int MIN_TRIMMABLE_CODE_LEN
     double GRID_SIZE_DEGREES
 
+    unsigned long GRID_LAT_RESOLUTION
+    unsigned long GRID_LON_RESOLUTION
+
 np.string_t = np.dtype('S%d' % (MAX_DIGITS + 1))
 ctypedef np.uint8_t UINT8
 ctypedef np.uint16_t UINT16
@@ -170,9 +173,9 @@ cdef  np.ndarray[UINT8, ndim=1] get_lengths(
         lv[r] = get_length(fw[r], fs[r], fe[r], fn[r], )
     return lengths
 
-# @cython.boundscheck(False)
-# @cython.wraparound(False)
-# @cython.nonecheck(False)
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.nonecheck(False)
 cdef  np.ndarray[UINT64, ndim=2] get_claim(
     double fw,
     double fs,
@@ -201,15 +204,12 @@ cdef  np.ndarray[UINT64, ndim=2] get_claim(
     cdef unsigned long[:, :] cv = claim
     cdef unsigned long i
     cdef unsigned long j
-    print(dx, dy)
     for i in range(dy):
         for j in range(dx):
             cv[i*dx+j, 0] = lx[j] + lw
             cv[i*dx+j, 1] = ly[i] + ls
 
     return claim
-
-
 
 cdef get_bound(
     unsigned long lx,
@@ -224,6 +224,7 @@ cdef get_bound(
     fe += GRID_SIZE_DEGREES / math.pow(GRID_COLUMNS, length-PAIR_LENGTH)
     return fw, fs, fe, fn
 
+# PAIR_RESOLUTIONS_ = [20.0, 1.0, .05, .0025, .000125]
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.nonecheck(False)
@@ -236,9 +237,38 @@ cdef  np.ndarray[F64, ndim=2] get_bounds(
     cdef double[:, :] bv = bounds
     cdef Py_ssize_t r
 
+    # TODO: This gives the tile at the precise point, which is wrong, misaligning tiles
+    # for r in range(lx.size):
+    #     bv[r, 0] = <double>lx[r] / FINAL_LON_PRECISION - MAX_LON
+    #     bv[r, 1] = <double>ly[r] / FINAL_LAT_PRECISION - MAX_LAT
+    #     bv[r, 2] =  bv[r, 0] + GRID_SIZE_DEGREES / math.pow(GRID_ROWS, lengths[r]-PAIR_LENGTH)
+    #     bv[r, 3] =  bv[r, 1] + GRID_SIZE_DEGREES / math.pow(GRID_COLUMNS, lengths[r]-PAIR_LENGTH)
+    # cdef double[:] lat_resolutions = GRID_SIZE_DEGREES * GRID_ROWS ** np.arange(1, GRID_LENGTH+1, dtype=np.float64)
+    # cdef double[:] lon_resolutions = GRID_SIZE_DEGREES * GRID_COLUMNS ** np.arange(1, GRID_LENGTH+1, dtype=np.float64)
+
+    cdef double[:] lat_resolutions = (
+        GRID_SIZE_DEGREES * GRID_ROWS
+        ** np.arange(GRID_LENGTH, 0, -1, dtype=np.float64)
+    )
+    cdef double[:] lon_resolutions = (
+        GRID_SIZE_DEGREES * GRID_COLUMNS
+        ** np.arange(GRID_LENGTH, 0, -1, dtype=np.float64)
+    )
+    # TODO: Instead of FINAL_LON_PRECISION use something baesd off length
+
+
     for r in range(lx.size):
-        bv[r, 0] = lx[r] / FINAL_LON_PRECISION
-        bv[r, 1] = ly[r] / FINAL_LAT_PRECISION
-        bv[r, 2] = bv[r, 0] + GRID_SIZE_DEGREES / math.pow(GRID_ROWS, lengths[r]-PAIR_LENGTH)
-        bv[r, 3] = bv[r, 1] + GRID_SIZE_DEGREES / math.pow(GRID_COLUMNS, lengths[r]-PAIR_LENGTH)
+        x = lx[r] // pow(GRID_COLUMNS, lengths[r]-PAIR_LENGTH)
+        y = ly[r] // pow(GRID_ROWS, lengths[r]-PAIR_LENGTH)
+
+
+        bv[r, 2] = lx / math.pow(GRID_COLUMNS, lengths[r]-PAIR_LENGTH)
+        bv[r, 3] = ly / math.pow(GRID_ROWS, lengths[r]-PAIR_LENGTH)
+
+
+
+
+
+
+
     return bounds
