@@ -1,13 +1,12 @@
-print('wtf')
-import os
-
+from typing import Union
 import numpy as np
 cimport numpy as np
 from numpy.typing import NDArray
-print(os.getcwd())
-from . cimport cfuncs
+cimport util.cfuncs as cfuncs
+# cimport cfuncs
 
 cdef extern from '<util/globals.h>':
+    pass
     char SEP
     unsigned int SEP_POS
     char * ALPHABET
@@ -40,9 +39,9 @@ ctypedef np.uint_t UINT
 ctypedef np.int_t INT
 
 def get_string(
-        x: int | float,
-        y: int | float,
-        unsigned char length,
+        x: Union[int, float],
+        y: Union[int, float],
+        length: int,
 ) -> str:
     if isinstance(x, float):
         x = int((x + MAX_LON) * FINAL_LON_PRECISION)
@@ -72,10 +71,11 @@ def get_strings(
     return cfuncs.get_strings(x, y, lengths)
 
 def get_length(
-        double fw,
-        double fs,
-        double fe,
-        double fn,
+        fw: float,
+        fs: float,
+        fe: float,
+        fn: float,
+
 ) -> int:
     return cfuncs.get_length(fw, fs, fe, fn)
 
@@ -106,8 +106,8 @@ def get_claim(
     return cfuncs.get_claim(fw, fs, fe, fn, length)
 
 def get_bound(
-        x: int | float,
-        y: int | float,
+        x: Union[int, float],
+        y: Union[int, float],
         length: int = 11,
 ) -> tuple[float, float, float, float]:
     """
@@ -124,8 +124,8 @@ def get_bound(
     return cfuncs.get_bound(x, y, length)
 
 def get_bounds(
-        x: NDArray[np.float64] | NDArray[np.uint64],
-        y: NDArray[np.float64] | NDArray[np.uint64],
+        x: NDArray,
+        y: NDArray,
         lengths: NDArray[np.uint8],
 ) -> NDArray[np.float64]:
     if x.dtype == np.float64:

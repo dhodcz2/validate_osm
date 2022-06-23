@@ -1,5 +1,5 @@
-#ifndef globals
-#define globals
+//#ifndef globals
+//#define globals
 
 #include "math.h"
 
@@ -31,5 +31,8 @@ const double GRID_SIZE_DEGREES = 0.000125;
 #define FINAL_LAT_PRECISION pow(GRID_ROWS, GRID_LENGTH) * PAIR_PRECISION
 #define FINAL_LON_PRECISION pow(GRID_COLUMNS, GRID_LENGTH) * PAIR_PRECISION
 
+#define GRID_LAT_RESOLUTION pow(GRID_ROWS, GRID_LENGTH)
+#define GRID_LON_RESOLUTION pow(GRID_COLUMNS, GRID_LENGTH)
 
-#endif
+
+//#endif

@@ -147,8 +147,8 @@ cdef  unsigned char get_length(
     # dw /= 3
     # dh /= 3
 
-    # dw /= 2.5
-    # dh /= 2.5
+    dw /= 2.5
+    dh /= 2.5
 
     # while col_degrees >= dw or row_degrees >= dh:
     while (
@@ -266,6 +266,7 @@ cdef np.ndarray[F64, ndim=2] get_bounds(
         lon_resolutions[l] = GRID_SIZE_DEGREES / pow(<unsigned long> GRID_COLUMNS, l)
 
 
+
     for r in range(lx.size):
         l = lengths[r] - PAIR_LENGTH
         bv[r, 0] = <double>(lx[r] // trim_lons[l]) / final_lon_precisions[l] - MAX_LON
@@ -282,3 +283,5 @@ cdef np.ndarray[F64, ndim=2] get_bounds(
 
 
     return bounds
+
+"include _geos.pxi"
