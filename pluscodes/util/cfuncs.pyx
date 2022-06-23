@@ -144,7 +144,17 @@ cdef  unsigned char get_length(
     cdef double dh = fn - fs
     cdef unsigned char c
 
-    while col_degrees >= dw or row_degrees >= dh:
+    # dw /= 3
+    # dh /= 3
+
+    # dw /= 2.5
+    # dh /= 2.5
+
+    # while col_degrees >= dw or row_degrees >= dh:
+    while (
+        col_degrees > dw
+        or row_degrees > dh
+    ):
         length += 1
         col_degrees /= GRID_COLUMNS
         row_degrees /= GRID_ROWS

@@ -1,5 +1,12 @@
+from typing import Union
+import posixpath
+
+sep = posixpath.sep
+import spatialpandas.geometry
+from typing import Iterator
+
+import itertools
 import functools
-import folium
 
 import geopandas as gpd
 import pygeos.creation
@@ -13,6 +20,7 @@ from geopandas import GeoSeries
 from numpy.typing import NDArray
 from pluscodes.util import *
 
+posixpath.sep = sep # somehow, the geographic dependencies are deleting posixpath.sep
 
 class DescriptorLoc:
     def __get__(self, instance: 'PlusCodes', owner):
@@ -64,11 +72,12 @@ class DescriptorCx:
     def __getitem__(self, item) -> 'PlusCodes':
         pc = self.pluscodes
         footprints = pc.footprints.cx[item]
-        heads = pc.heads.loc[idx[footprints.index, :]]
+        # heads = pc.heads.loc[idx[footprints.index, :]]
         claims = pc.claims.loc[idx[footprints.index, :, :]]
         return PlusCodes(
             footprints=footprints,
-            heads=heads,
+            # heads=heads,
+            heads=None,
             claims=claims
         )
         # return PlusCodes(heads, footprints, claims)
@@ -105,60 +114,85 @@ class PlusCodes:
         )
         return f'{self.__class__.__qualname__}[{bounds}]'
 
-    @classmethod
-    def from_footprints(cls, footprints: GeoSeries | GeoDataFrame):
-        footprints = footprints.geometry.to_crs(epsg=4326)
+    @staticmethod
+    def _get_footprints(gdf: GeoDataFrame) -> GeoDataFrame:
+        footprints = gdf.geometry.to_crs(epsg=4326)
         footprints = footprints.reset_index(drop=True)
         footprints.index.name = 'footprint'
         footprints: GeoDataFrame
+        return footprints.geometry.to_crs(epsg=4326)
 
+    @staticmethod
+    def _get_claims(footprints: GeoSeries) -> GeoSeries:
         fw, fs, fe, fn = footprints.bounds.T.values
-
-        # heads
         lengths = get_lengths(fw, fs, fe, fn)
-        points = footprints.representative_point()
-        fx = points.x.values
-        fy = points.y.values
-        heads = get_strings(x=fx, y=fy, lengths=lengths)
-        index = pd.MultiIndex.from_arrays((
-            np.arange(len(footprints)),
-            heads,
-        ), names=('footprint', 'head'))
-        bounds = get_bounds(fx, fy, lengths)
-        geometry = pygeos.creation.box(
-            bounds[:, 0], bounds[:, 1], bounds[:, 2], bounds[:, 3]
-        )
-        head = GeoSeries(geometry, index=index, crs=4326)
+        longs = list(map(get_claim, fw, fs, fe, fn, lengths))
+        sizes = list(map(len, longs))
+        count = sum(sizes)
+        longs: NDArray = np.concatenate(longs)
 
-        # claims
-        list_claims: list[NDArray[np.uint64]] = [
-            get_claim(w, s, e, n, l)
-            for w, s, e, n, l in zip(fw, fs, fe, fn, lengths)
-        ]
-        longs = np.concatenate(list_claims)
-        lx = longs[:, 0]
-        ly = longs[:, 1]
-        count = sum(map(len, list_claims))
+        # align the footprints to the claims
         iloc = np.fromiter((
             i
-            for i, list_ in enumerate(list_claims)
-            for _ in range(len(list_))
+            for i, size in enumerate(sizes)
+            for _ in range(size)
         ), dtype=np.uint64, count=count)
+        # footprints = footprints.iloc[iloc]
         lengths = lengths[iloc]
-        claims = get_strings(x=lx, y=ly, lengths=lengths)
+
+        bounds = get_bounds(longs[:, 0], longs[:, 1], lengths)
+        pairs: Iterator[tuple[NDArray, NDArray]] = (
+            (x, y)
+            for x, y in
+            itertools.product((bounds[:, 0], bounds[:, 2]), (bounds[:, 1], bounds[:, 3]))
+        )
+        loc = np.full(count, True, dtype=bool)
+        multipolygons = spatialpandas.geometry.MultiPolygonArray.from_geopandas(footprints)
+        for x, y in pairs:
+            points = spatialpandas.geometry.PointArray((x, y))
+            intersects = points.intersects(multipolygons)
+            loc &= intersects
+        #     points = pygeos.creation.points(x[loc], y[loc])
+        #     intersects = pygeos.intersects(footprints.geometry.values[loc], points)
+        #     loc &= intersects
+
+        # strings = get_strings(longs[loc, 0], longs[loc, 1], lengths[loc])
+        strings = get_strings(longs[:, 0], longs[:, 1], lengths)
         index = pd.MultiIndex.from_arrays((
-            iloc, heads[iloc], claims
-        ), names=('footprint', 'head', 'claim'))
-        bounds = get_bounds(lx, ly, lengths)
+            # footprints.index[loc],
+            footprints.index[iloc],
+            strings
+        ), names=('footprint', 'claim'))
+        # bounds = bounds[loc]
         geometry = pygeos.creation.box(
             bounds[:, 0], bounds[:, 1], bounds[:, 2], bounds[:, 3]
         )
-        claims = GeoSeries(geometry, index=index, crs=4326)
-        # TODO: in the morning, graphically investigate and implement pytest
+        claims = GeoSeries(
+            GeoSeries(geometry, index=index, crs=4326),
+            index=index,
+            crs=4326
+        )
+        return claims
 
+    # @staticmethod
+    # def _get_heads(claims: GeoSeries) -> GeoSeries:
+    #     groups = claims.groupby(level='claim').groups
+    #     loc = [
+    #         group[0]
+    #         for group in groups.values()
+    #     ]
+    #     heads = claims.loc[loc]
+    #     claims.drop(index=loc, inplace=True)
+    #     return heads
+    #
+    @classmethod
+    def from_gdf(cls, gdf: GeoSeries | GeoDataFrame) -> 'PlusCodes':
+        footprints = cls._get_footprints(gdf)
+        claims = cls._get_claims(footprints)
+        # heads = cls._get_heads(claims)
         return cls(
             footprints=footprints,
-            heads=head,
+            heads=None,
             claims=claims,
         )
 
@@ -171,9 +205,9 @@ class PlusCodes:
             footprints = gpd.read_parquet(filepath)
         else:
             footprints = gpd.read_file(filepath)
-        return cls.from_footprints(footprints)
+        return cls.from_gdf(footprints)
 
-    def xs(self, key: int | str, level) -> 'PlusCodes':
+    def xs(self, key: Union[int, str], level) -> 'PlusCodes':
         if level == 'footprint':
             footprints = self.footprints.xs(key)
             heads = self.heads.loc[idx[footprints.index, :]]
@@ -194,23 +228,28 @@ class PlusCodes:
 
     def explore(self, **kwargs) -> None:
         centroid = self.footprints.iloc[0].centroid
-        map = folium.Map(location=(centroid.y, centroid.x))
+        import folium
+        map = folium.Map(
+            location=(centroid.y, centroid.x),
+            zoom_start=16,
+        )
         footprints: GeoSeries = self.footprints
         footprints: GeoDataFrame = GeoDataFrame({
             # 'footprint': footprints.index.get_level_values('footprint'),
         }, geometry=footprints.geometry, crs=4326, index=footprints.index)
 
         heads: GeoSeries = self.heads
-        heads: GeoDataFrame = GeoDataFrame({
-            'head': heads.index.get_level_values('head'),
-        }, geometry=heads.geometry, crs=4326, index=heads.index)
+        if heads is not None:
+            heads: GeoDataFrame = GeoDataFrame({
+                'head': heads.index.get_level_values('head'),
+            }, geometry=heads.geometry, crs=4326, index=heads.index)
 
         claims: GeoSeries = self.claims
         claims: GeoDataFrame = GeoDataFrame({
             'claim': claims.index.get_level_values('claim'),
         }, geometry=claims.geometry, crs=4326, index=claims.index)
-        loc = claims.index.get_level_values('claim') != claims.index.get_level_values('head')
-        claims = claims.loc[loc]
+        # loc = claims.index.get_level_values('claim') != claims.index.get_level_values('head')
+        # claims = claims.loc[loc]
 
         footprints.explore(
             m=map,
@@ -219,10 +258,11 @@ class PlusCodes:
                 fill=False,
             )
         )
-        heads.explore(
-            m=map,
-            color='blue',
-        )
+        if heads is not None:
+            heads.explore(
+                m=map,
+                color='blue',
+            )
         claims.explore(
             m=map,
             color='red',
@@ -230,7 +270,7 @@ class PlusCodes:
         return map
 
 
-
 if __name__ == '__main__':
     pc = PlusCodes.from_file('/home/arstneio/Downloads/chicago.feather')
+    pc.explore()
     print()
