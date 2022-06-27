@@ -1,3 +1,8 @@
+import pandas as pd
+import pygeos.creation
+from numpy.typing import NDArray
+from typing import Union
+
 import spatialpandas.geometry.base
 from libc.stdlib cimport malloc, free
 # from cpython cimport Py_buffer
@@ -6,7 +11,6 @@ import numpy as np
 cimport numpy as np
 import geopandas as gpd
 import shapely.geometry
-import spatialpandas.geometry
 import spatialpandas.geometry
 import shapely.geometry
 cimport util.cfuncs as cfuncs
@@ -53,8 +57,12 @@ cdef class ShapeClaim:
     footprint: spatialpandas.geometry.base.Geometry
     cdef unsigned char length
 
-    cdef bint[:] visited
-    cdef bint[:] contained
+    # cdef np.ndarray[UINT8, ndim=1, cast=True] visited
+    # cdef np.ndarray[UINT8, ndim=1, cast=True] contained
+
+    cdef np.uint8_t[:] visited
+    cdef np.uint8_t[:] contained
+
     cdef Py_ssize_t claimrows
     cdef Py_ssize_t claimcols
     cdef Py_ssize_t pointrows
@@ -67,16 +75,23 @@ cdef class ShapeClaim:
     cdef unsigned long[:, :] longs
 
 
-    def __cinit__(self, footprint: shapely.geometry.base.BaseGeometry, unsigned char length):
+    # def __cinit__(self, footprint: shapely.geometry.base.BaseGeometry, unsigned char length):
+    def __cinit__(
+            self,
+            footprint: shapely.geometry.base.BaseGeometry,
+            unsigned char length,
+            unsigned long lw,
+            unsigned long ls,
+            unsigned long le,
+            unsigned long ln,
+    ):
         cdef Py_ssize_t r, c, i
         cdef double fw, fs, fe, fn
 
-        fw, fs, fe, fn= footprint.bounds
-        cdef unsigned long lw = <unsigned long> ((fw + MAX_LON) * FINAL_LON_PRECISION)
-        cdef unsigned long le = <unsigned long> ((fe + MAX_LON) * FINAL_LON_PRECISION)
-        cdef unsigned long ls = <unsigned long> ((fs + MAX_LAT) * FINAL_LAT_PRECISION)
-        cdef unsigned long ln = <unsigned long> ( (fn + MAX_LAT) * FINAL_LAT_PRECISION)
-
+        # cdef unsigned long lw = <unsigned long> ((fw + MAX_LON) * FINAL_LON_PRECISION)
+        # cdef unsigned long le = <unsigned long> ((fe + MAX_LON) * FINAL_LON_PRECISION)
+        # cdef unsigned long ls = <unsigned long> ((fs + MAX_LAT) * FINAL_LAT_PRECISION)
+        # cdef unsigned long ln = <unsigned long> ( (fn + MAX_LAT) * FINAL_LAT_PRECISION)
         cdef unsigned long xstep = pow(GRID_COLUMNS, MAX_DIGITS - length)
         cdef unsigned long ystep = pow(GRID_ROWS, MAX_DIGITS - length)
 
@@ -92,96 +107,77 @@ cdef class ShapeClaim:
         cdef longs = np.ndarray(shape=(self.pointrows * self.pointcols, 2), dtype=np.uint64)
         cdef unsigned long[:,:] longv = longs
 
-        print(f'pointrows={self.pointrows} pointcols={self.pointcols}')
         for r in range(self.pointrows):
             for c in range(self.pointcols):
                 longv[<Py_ssize_t> (r*self.pointcols+c), 0] = lw + dx[c]
                 longv[<Py_ssize_t> (r*self.pointcols+c), 1] = ls + dy[r]
 
-
         cdef np.ndarray[F64, ndim=2] coords = np.ndarray(shape=(self.pointcols*self.pointrows, 2), dtype=np.float64)
         cdef double[:, :] floatv = coords
-        cdef unsigned long final_lat_precision = PAIR_PRECISION * pow(GRID_ROWS, length)
-        cdef unsigned long final_lon_precision = PAIR_PRECISION * pow(GRID_COLUMNS, length)
-        cdef unsigned long trim_lats = pow(<unsigned long> GRID_ROWS, GRID_LENGTH-length)
-        cdef unsigned long trim_lons = pow(<unsigned long> GRID_COLUMNS, GRID_LENGTH-length)
+        cdef unsigned long final_lat_precision = PAIR_PRECISION * pow(GRID_ROWS, length - PAIR_LENGTH)
+        cdef unsigned long final_lon_precision = PAIR_PRECISION * pow(GRID_COLUMNS, length - PAIR_LENGTH)
+        cdef unsigned long trim_lats = pow(<unsigned long> GRID_ROWS, MAX_DIGITS-length)
+        cdef unsigned long trim_lons = pow(<unsigned long> GRID_COLUMNS, MAX_DIGITS-length)
 
-        print('populating floats')
         for r in range(self.pointrows):
             for c in range(self.pointcols):
                 i = r*self.pointcols+c
                 floatv[i, 0] = <double>(longv[i,0] // trim_lons) / final_lon_precision - MAX_LON
                 floatv[i, 1] = <double>(longv[i,1] // trim_lats) / final_lat_precision - MAX_LAT
-        print('done populating floats')
 
         self.length = length
-        self.visited = np.full(shape=(self.pointrows*self.pointcols), fill_value=False, dtype=np.bool)
-        self.contained = np.full(shape=(self.pointrows*self.pointcols), fill_value=False, dtype=np.bool)
-        print('point array')
+        self.visited = np.full(shape=(self.pointrows*self.pointcols), fill_value=0, dtype=np.uint8)
+        self.contained = np.full(shape=(self.pointrows*self.pointcols), fill_value=0, dtype=np.uint8)
         self.points = spatialpandas.geometry.PointArray((coords[:, 0], coords[:, 1]))
 
         self.longs = longv
-        print('cinit end')
 
-    def __init__(self, footprint: shapely.geometry.base.BaseGeometry, unsigned char length):
-        cdef Py_ssize_t r, c, n, i,
-        print(f'init base start')
-        self.recursion(0, 0, self.pointcols, self.pointrows)
+    def __init__(
+            self,
+            footprint: spatialpandas.geometry.base.Geometry,
+            unsigned char length,
+            unsigned long lw,
+            unsigned long ls,
+            unsigned long le,
+            unsigned long ln,
+    ):
+        cdef Py_ssize_t r, c, n, i, sw, se, nw, ne
+        # self.recursion(0, 0, self.pointcols, self.pointrows)
+        # print(f'{self.pointcols} x {self.pointrows}')
+        self.recursion(w=0,s=0,e=self.claimcols, n=self.claimrows)
 
         n = 0
-        # replace buffer with only contained points
         for r in range(self.claimrows):
             for c in range(self.claimcols):
-                i = r * self.pointcols + c
-                if self.contained[i]:
-                    self.longs[n, 0] = self.longs[i, 0]
-                    self.longs[n, 1] = self.longs[i, 1]
+                sw = r * self.pointcols + c
+                se = r * self.pointcols + c + 1
+                nw = (r + 1) * self.pointcols + c
+                ne = (r + 1) * self.pointcols + c + 1
+                if  self.contained[sw] and self.contained[se] and self.contained[nw] and self.contained[ne] :
+                    self.longs[n, 0] = self.longs[sw, 0]
+                    self.longs[n, 1] = self.longs[sw, 1]
                     n += 1
-        # assert n == self.size
-        print(f'init base end')
 
+
+        # print(f'n={n}, size={self.size}')
 
     def __len__(self):
         return self.size
 
-    # def __getbuffer__(self, Py_buffer *buffer, int flags):
-    #     cdef Py_ssize_t itemsize = sizeof(unsigned long)
-    #     self.shape[0] = self.size
-    #     self.shape[1] = 2
-    #     self.strides[1] = <Py_ssize_t> (
-    #         <char *>&(self.buf[1])
-    #         - <char *> &(self.buf[0])
-    #     )
-    #     self.strides[0] = 2 * self.strides[1]
-    #
-    #     # buffer.buf = <char *>(self.v[0])
-    #     buffer.buf = <char *>self.buf
-    #     buffer.format = 'i' # TODO
-    #     buffer.internal = NULL
-    #     buffer.itemsize = itemsize
-    #     buffer.len = self.size * 2 * itemsize
-    #     buffer.ndim = 2
-    #     buffer.obj = self
-    #     buffer.readonly = 1
-    #     buffer.shape = self.shape
-    #     buffer.strides = self.strides
-    #     buffer.suboffsets = NULL
-    #
-    # def __releasebuffer__(self, Py_buffer *buffer):
-    #     pass
-
-
     cdef recursion(self, Py_ssize_t w, Py_ssize_t s, Py_ssize_t e, Py_ssize_t n):
-        print(f'recursion {w} {s} {e} {n}')
+        # inclusive
         cdef Py_ssize_t sw, se, nw, ne, midx, midy, r, c
 
-        if e == w and n == s:
-            return # there is no tile
+        if e == w or n == s:
+            # No tile
+            return
 
         sw = s * self.pointcols + w
         se = s * self.pointcols + e
         nw = n * self.pointcols + w
         ne = n * self.pointcols + e
+        # print(f's={s}, n={n}, w={w}, e={e}')
+        # print(f'nw={nw}, ne={ne}, count={self.pointrows*self.pointcols}')
 
         if not self.visited[sw]:
             self.contained[sw] = self.points[sw].intersects(self.footprint)
@@ -197,43 +193,69 @@ cdef class ShapeClaim:
             self.visited[ne] = True
 
         if  self.contained[sw] and self.contained[se] and self.contained[nw] and self.contained[ne] :
+            # Case 1: Entire box is contained
+            # print(f'\tfully contained')
             # the box is completely contained in the polygon
-            for r in range(s, n):
-                for c in range(w, e):
+            for r in range(s, n+1):
+                for c in range(w, e+1):
                     self.contained[r * self.pointcols + c] = 1
             self.size += (e - w) * (n - s)
+        elif not (self.contained[sw] or self.contained[se] or self.contained[nw] or self.contained[ne]):
+            # Case 2: Entire box is not contained
+            return
         else:
-            midx = w + e
-            midx = midx // 2 + (midx % 2)
-            midy = s + n
-            midy = midy // 2 + (midy % 2)
-            if self.contained[sw]:
+            # Case 3: Box is partially contained
+            if w + 1 == e and s + 1 ==n :
+                # Cannot split further, and the box is not contained, so reject it
+                return
+            else:
+                # TODO: How are we getting s=n?
+                midx = w + e
+                midx = midx // 2 + (midx % 2)
+                midy = s + n
+                midy = midy // 2 + (midy % 2)
                 self.recursion(w, s, midx, midy)
-            if self.contained[se]:
                 self.recursion(midx, s, e, midy)
-            if self.contained[nw]:
                 self.recursion(w, midy, midx, n)
-            if self.contained[ne]:
                 self.recursion(midx, midy, e, n)
 
 
 
 cdef class PolygonClaim(ShapeClaim):
     footprint: spatialpandas.geometry.Polygon
+    def __init__(
+            self,
+            footprint: spatialpandas.geometry.Polygon,
+            unsigned char length,
+            unsigned long lw,
+            unsigned long ls,
+            unsigned long le,
+            unsigned long ln,
+    ):
+        self.footprint = footprint
+        super().__init__(footprint, length, lw, ls, le, ln)
 
-    def __init__(self, footprint: shapely.geometry.Polygon, unsigned char length):
-        print('init polygon start')
-        self.footprint = spatialpandas.geometry.Polygon(footprint)
-        super().__init__(footprint, length)
+    @classmethod
+    def from_shapely(cls, shapely_polygon: shapely.geometry.base.BaseGeometry, unsigned char length):
+        return cls(spatialpandas.geometry.Polygon(shapely_polygon), length)
 
 cdef class MultiPolygonClaim(ShapeClaim):
     footprint: spatialpandas.geometry.MultiPolygon
+    def __init__(
+            self,
+            footprint: spatialpandas.geometry.MultiPolygon,
+            unsigned char length,
+            unsigned long lw,
+            unsigned long ls,
+            unsigned long le,
+            unsigned long ln,
+    ):
+        self.footprint = footprint
+        super().__init__(footprint, length, lw, ls, le, ln)
 
-    def __init__(self, footprint: shapely.geometry.MultiPolygon, unsigned char length):
-        print('init multipolygon')
-        self.footprint = spatialpandas.geometry.MultiPolygon(footprint)
-        super().__init__(footprint, length)
-
+    @classmethod
+    def from_shapely(cls, footprint: shapely.geometry.base.BaseGeometry, unsigned char length):
+        return cls(spatialpandas.geometry.MultiPolygon.from_shapely(footprint), length)
 
 # cpdef get_claim( footprint, length: int):
 cpdef np.ndarray[UINT64, ndim=2] get_claim(
@@ -249,32 +271,73 @@ cpdef np.ndarray[UINT64, ndim=2] get_claim(
         raise ValueError('Unsupported geometry type: %s' % type(footprint))
     size = claim.size
 
-    cdef np.ndarray[UINT64, ndim=2] longs = np.zeros((size, 2), dtype=np.uint64)
+    # cdef np.ndarray[UINT64, ndim=2] longs = np.zeros((size, 2), dtype=np.uint64)
+    cdef np.ndarray[UINT64, ndim=2] longs = np.ndarray((size, 2), dtype=np.uint64)
+    print(f'size={size}')
     cdef unsigned long[:, :] longv = longs
-    for r in range(claim.claimrows):
-        for c in range(claim.claimcols):
-            i = r * claim.pointcols + c
-            longv[i, 0] = claim.longs[i, 0]
-            longv[i, 1] = claim.longs[i, 1]
+    for n in range(claim.size):
+        longv[n, 0] = claim.longs[n, 0]
+        longv[n, 1] = claim.longs[n, 1]
+    return longs
 
-    return longv
-
-
-
-
-
-
-"""
-results: np.ndarray[object] = np.ndarray(len(footprints), dtype=object)
-for l, f in zip(lengths, footprints):
-    results[l] = FactoryClaim(f, l)
-sum = 0
-np.ndarray[UINT64] claims = np.ndarray(sum, dtype=np.uint64)
-i = 0
-for r in results:
-    claims[i] = r
-    i += 1
-    
+def generate_claims(
+        footprints: Union[gpd.GeoDataFrame, gpd.GeoSeries],
+) -> gpd.GeoSeries:
+    cdef Py_ssize_t n, size, i
+    cdef unsigned long[:, :] longv
+    cdef ShapeClaim claim
+    # cdef unsigned long[:] lw, ls, le, ln
+    footprints = footprints.to_crs(epsg=4326).geometry
+    fw, fs, fe, fn = footprints.geometry.bounds.T.values
+    lw = np.ndarray.astype((fw + MAX_LON) * FINAL_LON_PRECISION, dtype=np.uint64)
+    ls = np.ndarray.astype((fs + MAX_LAT) * FINAL_LAT_PRECISION, dtype=np.uint64)
+    le = np.ndarray.astype((fe + MAX_LON) * FINAL_LON_PRECISION, dtype=np.uint64)
+    ln = np.ndarray.astype((fn + MAX_LAT) * FINAL_LAT_PRECISION, dtype=np.uint64)
 
 
-"""
+    lengths = cfuncs.get_lengths(fw, fs, fe, fn)
+    loc = np.fromiter((
+        isinstance(footprint, shapely.geometry.MultiPolygon)
+        for footprint in footprints
+    ), dtype=bool, count=len(footprints))
+    multipolygons = spatialpandas.geometry.MultiPolygonArray.from_geopandas(footprints[loc])
+    polygons = spatialpandas.geometry.PolygonArray.from_geopandas(footprints[~loc])
+
+    # claims = list(map(MultiPolygonClaim, multipolygons, lengths[loc]))
+    # claims.extend(map(PolygonClaim, polygons, lengths[~loc]))
+
+    claims = list(map(
+        MultiPolygonClaim, multipolygons, lengths[loc], lw[loc], ls[loc], le[loc], ln[loc]
+    ))
+    claims.extend(map(
+        PolygonClaim, polygons, lengths[~loc], lw[~loc], ls[~loc], le[~loc], ln[~loc]
+    ))
+
+    sizes = [claim.size for claim in claims]
+    count = sum(sizes)
+    cdef np.ndarray[UINT64, ndim=2] longs = np.ndarray((count, 2), dtype=np.uint64)
+    longv = longs
+
+    n = 0
+    for claim, size in zip(claims, sizes):
+        for i in range(size):
+            longv[n, 0] = claim.longs[i, 0]
+            longv[n, 1] = claim.longs[i, 1]
+            n += 1
+
+    strings = cfuncs.get_strings(longv[:, 0,], longv[:, 1,], lengths)
+    index = pd.MultiIndex.from_arrays((
+        np.concatenate((footprints.index.values[loc], footprints.index.values[~loc])),
+        strings,
+    ), names=('footprint', 'claim'))
+    bounds = cfuncs.get_bounds(longv[:, 0,], longv[:, 1,], lengths)
+    geometry = pygeos.creation.box( bounds[:,0], bounds[:,1], bounds[:,2], bounds[:,3], )
+
+    claims = gpd.GeoSeries(
+        geometry,
+        index=index,
+        crs=footprints.crs,
+    )
+    return claims
+
+

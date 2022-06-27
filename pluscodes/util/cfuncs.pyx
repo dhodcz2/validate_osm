@@ -1,10 +1,14 @@
+import shapely.geometry
 import math
 cimport cython
+import spatialpandas.geometry
 from libc.stdlib cimport malloc
 from libc.stdlib cimport free
 
 import numpy as np
 cimport numpy as np
+
+
 
 cdef extern from '<util/globals.h>':
     char SEP
@@ -40,6 +44,7 @@ ctypedef np.uint64_t UINT64
 ctypedef np.int64_t INT64
 ctypedef np.uint_t UINT
 ctypedef np.int_t INT
+ctypedef np.uint8_t BOOL
 
 
 cdef get_string(
@@ -212,8 +217,7 @@ cdef  np.ndarray[UINT64, ndim=2] get_claim(
 
     cdef np.ndarray[UINT64, ndim=2] claim = np.ndarray(shape=(dx*dy, 2 ), dtype=np.uint64)
     cdef unsigned long[:, :] cv = claim
-    cdef unsigned long i
-    cdef unsigned long j
+    cdef unsigned long i, j
     for i in range(dy):
         for j in range(dx):
             cv[i*dx+j, 0] = lx[j] + lw
@@ -238,7 +242,8 @@ cdef get_bound(
 # @cython.wraparound(False)
 # @cython.nonecheck(False)
 cdef np.ndarray[F64, ndim=2] get_bounds(
-    unsigned long[:] lx,
+# def get_bounds(
+        unsigned long[:] lx,
     unsigned long[:] ly,
     unsigned char[:] lengths,
 ):
@@ -268,7 +273,12 @@ cdef np.ndarray[F64, ndim=2] get_bounds(
 
 
     for r in range(lx.size):
-        l = lengths[r] - PAIR_LENGTH
+        try:
+            l = lengths[r] - PAIR_LENGTH
+        except IndexError:
+            print(f'r={r}')
+            raise IndexError
+            # raise
         bv[r, 0] = <double>(lx[r] // trim_lons[l]) / final_lon_precisions[l] - MAX_LON
         bv[r, 1] = <double>(ly[r] // trim_lats[l]) / final_lat_precisions[l] - MAX_LAT
         bv[r, 2] = bv[r, 0] + lon_resolutions[l]
@@ -284,4 +294,52 @@ cdef np.ndarray[F64, ndim=2] get_bounds(
 
     return bounds
 
-"include _geos.pxi"
+cdef np.ndarray[F64, ndim=2] get_points(
+        unsigned long[:] lx,
+        unsigned long[:] ly,
+        unsigned char[:] lengths,
+):
+    cdef np.ndarray[F64, ndim=2] coords = np.ndarray(shape=(lx.size, 2), dtype=np.float64)
+    cdef double[:, :] cv = coords
+    cdef Py_ssize_t r
+    cdef unsigned char l
+
+    cdef unsigned int m = (GRID_LENGTH+1) * sizeof(unsigned long)
+    cdef unsigned long *final_lat_precisions = <unsigned long *> malloc(m)
+    cdef unsigned long *final_lon_precisions = <unsigned long *> malloc(m)
+    cdef unsigned long *trim_lats = <unsigned long *> malloc(m)
+    cdef unsigned long *trim_lons = <unsigned long *> malloc(m)
+
+    # m = (GRID_LENGTH+1) * sizeof(double)
+    # cdef double *lat_resolutions = <double *> malloc(m)
+    # cdef double *lon_resolutions = <double *> malloc(m)
+
+    for l in range(GRID_LENGTH+1):
+        final_lat_precisions[l] =  PAIR_PRECISION * pow(GRID_ROWS, l)
+        final_lon_precisions[l] =  PAIR_PRECISION * pow(GRID_COLUMNS, l)
+        trim_lats[l] = pow(<unsigned long> GRID_ROWS, GRID_LENGTH-l)
+        trim_lons[l] = pow(<unsigned long> GRID_COLUMNS, GRID_LENGTH-l)
+        # lat_resolutions[l] = GRID_SIZE_DEGREES / pow(<unsigned long> GRID_ROWS, l)
+        # lon_resolutions[l] = GRID_SIZE_DEGREES / pow(<unsigned long> GRID_COLUMNS, l)
+
+    for r in range(lx.size):
+        l = lengths[r] - PAIR_LENGTH
+        cv[r, 0] = <double>(lx[r] // trim_lons[l]) / final_lon_precisions[l] - MAX_LON
+        cv[r, 1] = <double>(ly[r] // trim_lats[l]) / final_lat_precisions[l] - MAX_LAT
+
+    free(final_lat_precisions)
+    free(final_lon_precisions)
+    free(trim_lats)
+    free(trim_lons)
+    # free(lat_resolutions)
+    # free(lon_resolutions)
+
+    ...
+
+
+
+
+
+
+
+
