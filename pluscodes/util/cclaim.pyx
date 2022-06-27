@@ -86,12 +86,7 @@ cdef class ShapeClaim:
             unsigned long ln,
     ):
         cdef Py_ssize_t r, c, i
-        cdef double fw, fs, fe, fn
 
-        # cdef unsigned long lw = <unsigned long> ((fw + MAX_LON) * FINAL_LON_PRECISION)
-        # cdef unsigned long le = <unsigned long> ((fe + MAX_LON) * FINAL_LON_PRECISION)
-        # cdef unsigned long ls = <unsigned long> ((fs + MAX_LAT) * FINAL_LAT_PRECISION)
-        # cdef unsigned long ln = <unsigned long> ( (fn + MAX_LAT) * FINAL_LAT_PRECISION)
         cdef unsigned long xstep = pow(GRID_COLUMNS, MAX_DIGITS - length)
         cdef unsigned long ystep = pow(GRID_ROWS, MAX_DIGITS - length)
 
@@ -176,8 +171,6 @@ cdef class ShapeClaim:
         se = s * self.pointcols + e
         nw = n * self.pointcols + w
         ne = n * self.pointcols + e
-        # print(f's={s}, n={n}, w={w}, e={e}')
-        # print(f'nw={nw}, ne={ne}, count={self.pointrows*self.pointcols}')
 
         if not self.visited[sw]:
             self.contained[sw] = self.points[sw].intersects(self.footprint)
@@ -279,23 +272,12 @@ cpdef np.ndarray[UINT64, ndim=2] get_claim(
         longv[n, 0] = claim.longs[n, 0]
         longv[n, 1] = claim.longs[n, 1]
     return longs
-
-def generate_claims(
-        footprints: Union[gpd.GeoDataFrame, gpd.GeoSeries],
-) -> gpd.GeoSeries:
+def generate_claims(footprints: Union[gpd.GeoDataFrame, gpd.GeoSeries]) -> gpd.GeoSeries:
     cdef Py_ssize_t n, size, i
     cdef unsigned long[:, :] longv
     cdef ShapeClaim claim
-    # cdef unsigned long[:] lw, ls, le, ln
+
     footprints = footprints.to_crs(epsg=4326).geometry
-    fw, fs, fe, fn = footprints.geometry.bounds.T.values
-    lw = np.ndarray.astype((fw + MAX_LON) * FINAL_LON_PRECISION, dtype=np.uint64)
-    ls = np.ndarray.astype((fs + MAX_LAT) * FINAL_LAT_PRECISION, dtype=np.uint64)
-    le = np.ndarray.astype((fe + MAX_LON) * FINAL_LON_PRECISION, dtype=np.uint64)
-    ln = np.ndarray.astype((fn + MAX_LAT) * FINAL_LAT_PRECISION, dtype=np.uint64)
-
-
-    lengths = cfuncs.get_lengths(fw, fs, fe, fn)
     loc = np.fromiter((
         isinstance(footprint, shapely.geometry.MultiPolygon)
         for footprint in footprints
@@ -303,36 +285,56 @@ def generate_claims(
     multipolygons = spatialpandas.geometry.MultiPolygonArray.from_geopandas(footprints[loc])
     polygons = spatialpandas.geometry.PolygonArray.from_geopandas(footprints[~loc])
 
-    # claims = list(map(MultiPolygonClaim, multipolygons, lengths[loc]))
-    # claims.extend(map(PolygonClaim, polygons, lengths[~loc]))
+    fw, fs, fe, fn = footprints.geometry.bounds.T.values
+    lw = np.ndarray.astype((fw + MAX_LON) * FINAL_LON_PRECISION, dtype=np.uint64)
+    ls = np.ndarray.astype((fs + MAX_LAT) * FINAL_LAT_PRECISION, dtype=np.uint64)
+    le = np.ndarray.astype((fe + MAX_LON) * FINAL_LON_PRECISION, dtype=np.uint64)
+    ln = np.ndarray.astype((fn + MAX_LAT) * FINAL_LAT_PRECISION, dtype=np.uint64)
+    lengths = cfuncs.get_lengths(fw, fs, fe, fn)
 
-    claims = list(map(
-        MultiPolygonClaim, multipolygons, lengths[loc], lw[loc], ls[loc], le[loc], ln[loc]
-    ))
-    claims.extend(map(
-        PolygonClaim, polygons, lengths[~loc], lw[~loc], ls[~loc], le[~loc], ln[~loc]
-    ))
+    claims = list(map( MultiPolygonClaim, multipolygons, lengths[loc], lw[loc], ls[loc], le[loc], ln[loc] ))
+    claims.extend(map( PolygonClaim, polygons, lengths[~loc], lw[~loc], ls[~loc], le[~loc], ln[~loc] ))
+
+    lengths = np.concatenate((lengths[loc], lengths[~loc]))
 
     sizes = [claim.size for claim in claims]
     count = sum(sizes)
+    cdef np.ndarray[UINT64, ndim=1] extension = np.fromiter((
+        i
+        for i, size in enumerate(sizes)
+        for n in range(size)
+    ), dtype=np.uint64, count=count)
+    lengths = lengths[extension]
+
     cdef np.ndarray[UINT64, ndim=2] longs = np.ndarray((count, 2), dtype=np.uint64)
+    cdef unsigned char[:] lengthv = lengths
     longv = longs
 
+    names = np.arange(len(footprints), dtype=np.uint64)
+    names = names[extension]
+    cdef unsigned long [:] namev = names
+
+    print(list(lengths))
     n = 0
+    # TODO: Why are all the lengths= 11 from this?
+    #   instead of repopulating the same array, just fill out a new one
     for claim, size in zip(claims, sizes):
         for i in range(size):
             longv[n, 0] = claim.longs[i, 0]
             longv[n, 1] = claim.longs[i, 1]
+            lengthv[n] = lengthv[i]
+            namev[n] = namev[i]
             n += 1
+    print(list(lengths))
 
-    strings = cfuncs.get_strings(longv[:, 0,], longv[:, 1,], lengths)
-    index = pd.MultiIndex.from_arrays((
-        np.concatenate((footprints.index.values[loc], footprints.index.values[~loc])),
-        strings,
-    ), names=('footprint', 'claim'))
-    bounds = cfuncs.get_bounds(longv[:, 0,], longv[:, 1,], lengths)
-    geometry = pygeos.creation.box( bounds[:,0], bounds[:,1], bounds[:,2], bounds[:,3], )
+    longv = longv[:n, :]
+    lengthv = lengthv[:n]
+    names = names[:n]
+    strings = cfuncs.get_strings(longv[:, 0], longv[:, 1], lengthv)
+    index = pd.MultiIndex.from_arrays(( names, strings, ), names=('footprint', 'claim'))
 
+    bounds = cfuncs.get_bounds(longv[:, 0], longv[:, 1], lengthv)
+    geometry = pygeos.creation.box( bounds[:,0], bounds[:,1], bounds[:,2], bounds[:,3])
     claims = gpd.GeoSeries(
         geometry,
         index=index,
