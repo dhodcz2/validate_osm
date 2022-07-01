@@ -1,26 +1,32 @@
-from typing import Union
+# TODO: For every footprint, the head should contain the centroid,
+#   and there should be a minimum thickness of 2 tiles at the centroid
+# TODO: Multipolygons are currently generating tiles between polygons. Is this appropriate?
+import os
+import tempfile
 import posixpath
+import zipfile
 
-sep = posixpath.sep
-import spatialpandas.geometry
-from typing import Iterator
-
-import itertools
-import functools
-
-import geopandas as gpd
+import pandas as pd
 import pygeos.creation
 
-from geopandas import GeoDataFrame, GeoSeries
+sep = posixpath.sep
+
 from pandas import IndexSlice as idx
+from typing import Union, Optional
+import folium
+import functools
+import geopandas as gpd
+from geopandas import GeoDataFrame
+from pandas import IndexSlice as idx
+import pluscodes.util as util
 
 import numpy as np
-import pandas as pd
 from geopandas import GeoSeries
-from numpy.typing import NDArray
-from pluscodes.util import *
 
-posixpath.sep = sep # somehow, the geographic dependencies are deleting posixpath.sep
+posixpath.sep = sep  # somehow, the geographic dependencies are deleting posixpath.sep
+
+__all__ = ['PlusCodes']
+
 
 class DescriptorLoc:
     def __get__(self, instance: 'PlusCodes', owner):
@@ -95,7 +101,7 @@ class PlusCodes:
     iloc = DescriptorIloc()
     cx = DescriptorCx()
 
-    def __init__(self, footprints: GeoSeries, heads: GeoSeries, claims: GeoSeries):
+    def __init__(self, footprints: GeoDataFrame, heads: GeoDataFrame, claims: GeoDataFrame):
         self.footprints = footprints
         self.heads = heads
         self.claims = claims
@@ -114,98 +120,88 @@ class PlusCodes:
         )
         return f'{self.__class__.__qualname__}[{bounds}]'
 
-    @staticmethod
-    def _get_footprints(gdf: GeoDataFrame) -> GeoDataFrame:
-        footprints = gdf.geometry.to_crs(epsg=4326)
+    @classmethod
+    def __footprints(cls, gdf: GeoDataFrame) -> GeoDataFrame:
+        footprints = gdf.to_crs(epsg=4326)
+        # lengths = util.get_lengths(*footprints.geometry.bounds.values.T)
+        # footprints = footprints[lengths <= 12]
         footprints = footprints.reset_index(drop=True)
         footprints.index.name = 'footprint'
-        footprints: GeoDataFrame
-        return footprints.geometry.to_crs(epsg=4326)
+        return footprints
 
-    @staticmethod
-    def _get_claims(footprints: GeoSeries) -> GeoSeries:
-        fw, fs, fe, fn = footprints.bounds.T.values
-        lengths = get_lengths(fw, fs, fe, fn)
-        longs = list(map(get_claim, fw, fs, fe, fn, lengths))
-        sizes = list(map(len, longs))
-        count = sum(sizes)
-        longs: NDArray = np.concatenate(longs)
+    @classmethod
+    def __lengths(cls, gdf: GeoDataFrame) -> np.ndarray:
+        return util.get_lengths(*gdf.geometry.bounds.values.T)
 
-        # align the footprints to the claims
-        iloc = np.fromiter((
-            i
-            for i, size in enumerate(sizes)
-            for _ in range(size)
-        ), dtype=np.uint64, count=count)
-        # footprints = footprints.iloc[iloc]
-        lengths = lengths[iloc]
+    @classmethod
+    def __claims(cls, footprints: GeoDataFrame, lengths) -> GeoDataFrame:
+        return util.generate_claims(footprints, lengths)
 
-        bounds = get_bounds(longs[:, 0], longs[:, 1], lengths)
-        pairs: Iterator[tuple[NDArray, NDArray]] = (
-            (x, y)
-            for x, y in
-            itertools.product((bounds[:, 0], bounds[:, 2]), (bounds[:, 1], bounds[:, 3]))
-        )
-        loc = np.full(count, True, dtype=bool)
-        multipolygons = spatialpandas.geometry.MultiPolygonArray.from_geopandas(footprints)
-        for x, y in pairs:
-            points = spatialpandas.geometry.PointArray((x, y))
-            intersects = points.intersects(multipolygons)
-            loc &= intersects
-        #     points = pygeos.creation.points(x[loc], y[loc])
-        #     intersects = pygeos.intersects(footprints.geometry.values[loc], points)
-        #     loc &= intersects
-
-        # strings = get_strings(longs[loc, 0], longs[loc, 1], lengths[loc])
-        strings = get_strings(longs[:, 0], longs[:, 1], lengths)
+    @classmethod
+    def __heads(cls, footprints: GeoDataFrame, lengths) -> GeoDataFrame:
+        # TODO: Get centroids without creating the shapely objects
+        points = footprints.representative_point()
+        # centroid = footprints.geometry.centroid
+        x = points.x.values
+        y = points.y.values
+        bounds = util.get_bounds(x, y, lengths)
+        names = util.get_strings(x, y, lengths)
         index = pd.MultiIndex.from_arrays((
-            # footprints.index[loc],
-            footprints.index[iloc],
-            strings
-        ), names=('footprint', 'claim'))
-        # bounds = bounds[loc]
-        geometry = pygeos.creation.box(
-            bounds[:, 0], bounds[:, 1], bounds[:, 2], bounds[:, 3]
-        )
-        claims = GeoSeries(
-            GeoSeries(geometry, index=index, crs=4326),
+            np.arange(len(footprints)),
+            names
+        ), names=('footprint', 'head'))
+        geometry = pygeos.creation.box(bounds[:, 0], bounds[:, 1], bounds[:, 2], bounds[:, 3])
+        heads = GeoDataFrame(
             index=index,
+            geometry=geometry,
             crs=4326
         )
-        return claims
+        return heads
 
-    # @staticmethod
-    # def _get_heads(claims: GeoSeries) -> GeoSeries:
-    #     groups = claims.groupby(level='claim').groups
-    #     loc = [
-    #         group[0]
-    #         for group in groups.values()
-    #     ]
-    #     heads = claims.loc[loc]
-    #     claims.drop(index=loc, inplace=True)
-    #     return heads
-    #
     @classmethod
-    def from_gdf(cls, gdf: GeoSeries | GeoDataFrame) -> 'PlusCodes':
-        footprints = cls._get_footprints(gdf)
-        claims = cls._get_claims(footprints)
-        # heads = cls._get_heads(claims)
-        return cls(
-            footprints=footprints,
-            heads=None,
-            claims=claims,
-        )
+    def from_gdf(cls, gdf: Union[GeoDataFrame, GeoSeries, str]) -> 'PlusCodes':
+        if isinstance(gdf, str):
+            extension = gdf.rpartition('.')[-1]
+            if extension == 'feather':
+                gdf = gpd.read_feather(gdf)
+            elif extension == 'parquet':
+                gdf = gpd.read_parquet(gdf)
+            else:
+                gdf = gpd.read_file(gdf)
+
+        footprints = cls.__footprints(gdf)
+        lengths = cls.__lengths(footprints)
+        claims = cls.__claims(footprints, lengths)
+        heads = cls.__heads(footprints, lengths)
+        return cls(footprints=footprints, heads=heads, claims=claims)
 
     @classmethod
     def from_file(cls, filepath: str) -> 'PlusCodes':
-        extension = filepath.rpartition('.')[-1]
-        if extension == 'feather':
-            footprints = gpd.read_feather(filepath)
-        elif extension == 'parquet':
-            footprints = gpd.read_parquet(filepath)
-        else:
-            footprints = gpd.read_file(filepath)
-        return cls.from_gdf(footprints)
+        with zipfile.ZipFile(filepath) as zf:
+            tempdir = tempfile.gettempdir()
+            footprints = zf.extract('footprints.feather', tempdir)
+            claims = zf.extract('claims.feather', tempdir)
+            heads = zf.extract('heads.feather', tempdir)
+        footprints = gpd.read_feather(footprints)
+        claims = gpd.read_feather(claims)
+        heads = gpd.read_feather(heads)
+        return cls(footprints=footprints, heads=heads, claims=claims)
+
+    def to_file(self, path: Optional[str] = None) -> str:
+        if path is None:
+            tempdir = tempfile.gettempdir()
+            path = os.path.join(os.getcwd(), 'pluscodes.zip')
+        footprints = os.path.join(tempdir, 'footprints.feather')
+        heads = os.path.join(tempdir, 'heads.feather')
+        claims = os.path.join(tempdir, 'claims.feather')
+        self.footprints.to_feather(footprints)
+        self.heads.to_feather(heads)
+        self.claims.to_feather(claims)
+        with zipfile.ZipFile(path, 'w') as zip:
+            zip.write(footprints)
+            zip.write(heads)
+            zip.write(claims)
+        return path
 
     def xs(self, key: Union[int, str], level) -> 'PlusCodes':
         if level == 'footprint':
@@ -226,51 +222,65 @@ class PlusCodes:
             raise ValueError(f'{level} is not supported')
         return PlusCodes(footprints, heads, claims)
 
-    def explore(self, **kwargs) -> None:
-        centroid = self.footprints.iloc[0].centroid
-        import folium
-        map = folium.Map(
-            location=(centroid.y, centroid.x),
-            zoom_start=16,
-        )
-        footprints: GeoSeries = self.footprints
+    def explore(self, **kwargs) -> folium.Map:
+        centroid = self.footprints.geometry.iloc[0].centroid
+        footprints: GeoDataFrame = self.footprints
         footprints: GeoDataFrame = GeoDataFrame({
-            # 'footprint': footprints.index.get_level_values('footprint'),
         }, geometry=footprints.geometry, crs=4326, index=footprints.index)
 
-        heads: GeoSeries = self.heads
-        if heads is not None:
-            heads: GeoDataFrame = GeoDataFrame({
-                'head': heads.index.get_level_values('head'),
-            }, geometry=heads.geometry, crs=4326, index=heads.index)
+        heads: GeoDataFrame = self.heads
+        heads: GeoDataFrame = GeoDataFrame({
+            'head': heads.index.get_level_values('head'),
+        }, geometry=heads.geometry, crs=4326, index=heads.index)
 
-        claims: GeoSeries = self.claims
+        claims: GeoDataFrame = self.claims
         claims: GeoDataFrame = GeoDataFrame({
             'claim': claims.index.get_level_values('claim'),
         }, geometry=claims.geometry, crs=4326, index=claims.index)
-        # loc = claims.index.get_level_values('claim') != claims.index.get_level_values('head')
-        # claims = claims.loc[loc]
 
+        head = set(heads.index.get_level_values('head'))
+        claims = claims[~claims.index.get_level_values('claim').isin(head)]
+
+        m = folium.Map(
+            location=(centroid.y, centroid.x),
+            zoom_start=16,
+        )
         footprints.explore(
-            m=map,
+            m=m,
             color='black',
             style_kwds=dict(
                 fill=False,
-            )
+            ),
+            **kwargs,
         )
-        if heads is not None:
-            heads.explore(
-                m=map,
-                color='blue',
-            )
+        # if heads is not None:
+        heads.explore(
+            m=m,
+            color='blue',
+            **kwargs,
+        )
         claims.explore(
-            m=map,
+            m=m,
             color='red',
+            **kwargs,
         )
-        return map
+        return m
 
 
 if __name__ == '__main__':
-    pc = PlusCodes.from_file('/home/arstneio/Downloads/chicago.feather')
+    import numpy as np
+    import geopandas as gpd
+    #
+    # gdf = gpd.read_feather('/home/arstneio/Downloads/gdf.feather')
+    # ne = gdf.cx[
+    #      -87.62779796578965: -87.61138284607217,
+    #      41.88077890032266:41.88806354070675,
+    #      ]
+    # pc = PlusCodes.from_gdf(ne)
+    # pc.explore()
+    import util.claim
+    import geopandas as gpd
+
+    gdf = gpd.read_feather('/home/arstneio/Downloads/ne.feather')
+    pc = PlusCodes.from_gdf(gdf)
     pc.explore()
-    print()

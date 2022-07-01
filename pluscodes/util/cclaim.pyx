@@ -75,7 +75,6 @@ cdef class ShapeClaim:
     cdef unsigned long[:, :] longs
 
 
-    # def __cinit__(self, footprint: shapely.geometry.base.BaseGeometry, unsigned char length):
     def __cinit__(
             self,
             footprint: shapely.geometry.base.BaseGeometry,
@@ -124,8 +123,8 @@ cdef class ShapeClaim:
         self.visited = np.full(shape=(self.pointrows*self.pointcols), fill_value=0, dtype=np.uint8)
         self.contained = np.full(shape=(self.pointrows*self.pointcols), fill_value=0, dtype=np.uint8)
         self.points = spatialpandas.geometry.PointArray((coords[:, 0], coords[:, 1]))
-
         self.longs = longv
+        self.size = 0
 
     def __init__(
             self,
@@ -137,9 +136,7 @@ cdef class ShapeClaim:
             unsigned long ln,
     ):
         cdef Py_ssize_t r, c, n, i, sw, se, nw, ne
-        # self.recursion(0, 0, self.pointcols, self.pointrows)
-        # print(f'{self.pointcols} x {self.pointrows}')
-        self.recursion(w=0,s=0,e=self.claimcols, n=self.claimrows)
+        self.kickoff(0, 0, self.claimcols, self.claimrows)
 
         n = 0
         for r in range(self.claimrows):
@@ -153,25 +150,32 @@ cdef class ShapeClaim:
                     self.longs[n, 1] = self.longs[sw, 1]
                     n += 1
 
-
-        # print(f'n={n}, size={self.size}')
-
     def __len__(self):
         return self.size
 
-    cdef recursion(self, Py_ssize_t w, Py_ssize_t s, Py_ssize_t e, Py_ssize_t n):
-        # inclusive
+    cdef inline void kickoff(self, Py_ssize_t w, Py_ssize_t s,  Py_ssize_t e, Py_ssize_t n):
         cdef Py_ssize_t sw, se, nw, ne, midx, midy, r, c
-
-        if e == w or n == s:
-            # No tile
-            return
-
         sw = s * self.pointcols + w
         se = s * self.pointcols + e
         nw = n * self.pointcols + w
         ne = n * self.pointcols + e
 
+        self.visit_corners(sw, se, nw, ne)
+        # while not (self.contained[sw] or self.contained[se] or  self.contained[nw] or self.contained[ne]):
+        #     s += 1
+        #     n -= 1
+        #     w += 1
+        #     e -= 1
+        #     sw = s * self.pointcols + w
+        #     se = s * self.pointcols + e
+        #     nw = n * self.pointcols + w
+        #     ne = n * self.pointcols + e
+        #     self.visit_corners(sw, se, nw, ne)
+
+        # if self.contained[sw] and self.contained[se] and self.contained[nw] and self.contained[ne]:
+        self.recursion(w, s, e, n)
+
+    cdef inline void visit_corners(self, Py_ssize_t sw, Py_ssize_t se,  Py_ssize_t nw, Py_ssize_t ne):
         if not self.visited[sw]:
             self.contained[sw] = self.points[sw].intersects(self.footprint)
             self.visited[sw] = True
@@ -185,32 +189,39 @@ cdef class ShapeClaim:
             self.contained[ne] = self.points[ne].intersects(self.footprint)
             self.visited[ne] = True
 
+    cdef inline void fill(self, Py_ssize_t w, Py_ssize_t s,  Py_ssize_t e, Py_ssize_t n):
+        for r in range(s, n + 1):
+            for c in range(w, e + 1):
+                self.contained[r * self.pointcols + c] = 1
+        self.size += (e - w) * (n - s)
+
+    cdef inline void partial(self, Py_ssize_t w, Py_ssize_t s,  Py_ssize_t e, Py_ssize_t n):
+        ...
+
+
+    cdef recursion(self, Py_ssize_t w, Py_ssize_t s, Py_ssize_t e, Py_ssize_t n):
+        sw = s * self.pointcols + w
+        se = s * self.pointcols + e
+        nw = n * self.pointcols + w
+        ne = n * self.pointcols + e
+
+        self.visit_corners(sw, se, nw, ne)
+
+        # TODO: Problem may be, that all of the bounds are not contained
         if  self.contained[sw] and self.contained[se] and self.contained[nw] and self.contained[ne] :
-            # Case 1: Entire box is contained
-            # print(f'\tfully contained')
-            # the box is completely contained in the polygon
-            for r in range(s, n+1):
-                for c in range(w, e+1):
-                    self.contained[r * self.pointcols + c] = 1
-            self.size += (e - w) * (n - s)
-        elif not (self.contained[sw] or self.contained[se] or self.contained[nw] or self.contained[ne]):
-            # Case 2: Entire box is not contained
-            return
-        else:
+            self.fill(w, s, e, n) # Case 1: Entire box is contained
+        elif self.contained[sw] or self.contained[se] or self.contained[nw] or self.contained[ne]:
             # Case 3: Box is partially contained
             if w + 1 == e and s + 1 ==n :
-                # Cannot split further, and the box is not contained, so reject it
-                return
-            else:
-                # TODO: How are we getting s=n?
-                midx = w + e
-                midx = midx // 2 + (midx % 2)
-                midy = s + n
-                midy = midy // 2 + (midy % 2)
-                self.recursion(w, s, midx, midy)
-                self.recursion(midx, s, e, midy)
-                self.recursion(w, midy, midx, n)
-                self.recursion(midx, midy, e, n)
+                return # Cannot split further, and the box is not contained, so reject it
+            midx = w + e
+            midx = midx // 2 + (midx % 2)
+            midy = s + n
+            midy = midy // 2 + (midy % 2)
+            self.recursion(w, s, midx, midy)
+            self.recursion(midx, s, e, midy)
+            self.recursion(w, midy, midx, n)
+            self.recursion(midx, midy, e, n)
 
 
 
@@ -250,10 +261,9 @@ cdef class MultiPolygonClaim(ShapeClaim):
     def from_shapely(cls, footprint: shapely.geometry.base.BaseGeometry, unsigned char length):
         return cls(spatialpandas.geometry.MultiPolygon.from_shapely(footprint), length)
 
-# cpdef get_claim( footprint, length: int):
 cpdef np.ndarray[UINT64, ndim=2] get_claim(
         footprint: shapely.geometry.base.BaseGeometry,
-        Py_ssize_t length,
+        unsigned char length,
 ):
     cdef Py_ssize_t size, r, c
     if isinstance(footprint, shapely.geometry.Polygon):
@@ -266,13 +276,18 @@ cpdef np.ndarray[UINT64, ndim=2] get_claim(
 
     # cdef np.ndarray[UINT64, ndim=2] longs = np.zeros((size, 2), dtype=np.uint64)
     cdef np.ndarray[UINT64, ndim=2] longs = np.ndarray((size, 2), dtype=np.uint64)
-    print(f'size={size}')
+    # print(f'size={size}')
     cdef unsigned long[:, :] longv = longs
     for n in range(claim.size):
         longv[n, 0] = claim.longs[n, 0]
         longv[n, 1] = claim.longs[n, 1]
     return longs
-def generate_claims(footprints: Union[gpd.GeoDataFrame, gpd.GeoSeries]) -> gpd.GeoSeries:
+
+# def generate_claims(footprints: Union[gpd.GeoDataFrame, gpd.GeoSeries]) -> gpd.GeoSeries:
+def generate_claims(
+        footprints: Union[gpd.GeoDataFrame, gpd.GeoSeries],
+        np.ndarray[UINT8, ndim=1] lengths,
+):
     cdef Py_ssize_t n, size, i
     cdef unsigned long[:, :] longv
     cdef ShapeClaim claim
@@ -290,10 +305,12 @@ def generate_claims(footprints: Union[gpd.GeoDataFrame, gpd.GeoSeries]) -> gpd.G
     ls = np.ndarray.astype((fs + MAX_LAT) * FINAL_LAT_PRECISION, dtype=np.uint64)
     le = np.ndarray.astype((fe + MAX_LON) * FINAL_LON_PRECISION, dtype=np.uint64)
     ln = np.ndarray.astype((fn + MAX_LAT) * FINAL_LAT_PRECISION, dtype=np.uint64)
-    lengths = cfuncs.get_lengths(fw, fs, fe, fn)
+    # lengths = cfuncs.get_lengths(fw, fs, fe, fn)
 
     claims = list(map( MultiPolygonClaim, multipolygons, lengths[loc], lw[loc], ls[loc], le[loc], ln[loc] ))
     claims.extend(map( PolygonClaim, polygons, lengths[~loc], lw[~loc], ls[~loc], le[~loc], ln[~loc] ))
+    print(f'claims={len(claims)}')
+    print(f'count')
 
     lengths = np.concatenate((lengths[loc], lengths[~loc]))
 
@@ -310,28 +327,25 @@ def generate_claims(footprints: Union[gpd.GeoDataFrame, gpd.GeoSeries]) -> gpd.G
     cdef unsigned char[:] lengthv = lengths
     longv = longs
 
-    names = np.arange(len(footprints), dtype=np.uint64)
-    names = names[extension]
-    cdef unsigned long [:] namev = names
+    iloc = np.arange(len(footprints), dtype=np.uint64)
+    iloc = iloc[extension]
+    cdef unsigned long [:] ilocv = iloc
 
-    print(list(lengths))
     n = 0
-    # TODO: Why are all the lengths= 11 from this?
-    #   instead of repopulating the same array, just fill out a new one
+
     for claim, size in zip(claims, sizes):
         for i in range(size):
             longv[n, 0] = claim.longs[i, 0]
             longv[n, 1] = claim.longs[i, 1]
-            lengthv[n] = lengthv[i]
-            namev[n] = namev[i]
             n += 1
-    print(list(lengths))
 
-    longv = longv[:n, :]
-    lengthv = lengthv[:n]
-    names = names[:n]
+    print(f'n={n}, count={count}')
+
+    # longv = longv[:n, :]
+    # lengthv = lengthv[:n]
+    # iloc = iloc[:n]
     strings = cfuncs.get_strings(longv[:, 0], longv[:, 1], lengthv)
-    index = pd.MultiIndex.from_arrays(( names, strings, ), names=('footprint', 'claim'))
+    index = pd.MultiIndex.from_arrays(( iloc, strings, ), names=('footprint', 'claim'))
 
     bounds = cfuncs.get_bounds(longv[:, 0], longv[:, 1], lengthv)
     geometry = pygeos.creation.box( bounds[:,0], bounds[:,1], bounds[:,2], bounds[:,3])
@@ -341,5 +355,3 @@ def generate_claims(footprints: Union[gpd.GeoDataFrame, gpd.GeoSeries]) -> gpd.G
         crs=footprints.crs,
     )
     return claims
-
-

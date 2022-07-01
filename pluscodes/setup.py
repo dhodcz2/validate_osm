@@ -11,7 +11,7 @@ ext_modules = [
         include_dirs=[
             np.get_include(),
             os.path.dirname(__file__),
-            os.path.join(os.path.dirname(__file__), 'util'),
+            # os.path.join(os.path.dirname(__file__), 'util'),
         ],
         define_macros=[('NPY_NO_DEPRECATED_API', 'NPY_1_7_API_VERSION')],
     ),
@@ -23,7 +23,6 @@ ext_modules = [
             os.path.dirname(__file__),
             os.path.join(os.path.dirname(__file__), 'util'),
         ],
-        # include_dirs=[np.get_include(), os.path.dirname(__file__)],
         define_macros=[('NPY_NO_DEPRECATED_API', 'NPY_1_7_API_VERSION')],
     ),
     Extension(
@@ -34,10 +33,44 @@ ext_modules = [
             os.path.dirname(__file__),
             os.path.join(os.path.dirname(__file__), 'util'),
         ],
-        # include_dirs=[np.get_include(), os.path.dirname(__file__)],
         define_macros=[('NPY_NO_DEPRECATED_API', 'NPY_1_7_API_VERSION')],
         language='c++',
     ),
+    Extension(
+        'util.length',
+        sources=['util/cylength.pyx'],
+        include_dirs=[
+            np.get_include(),
+            os.path.dirname(__file__),
+            os.path.join(os.path.dirname(__file__), 'util'),
+            os.path.join(os.path.dirname(__file__), 'util/pygeos/src'),
+        ],
+        define_macros=[('NPY_NO_DEPRECATED_API', 'NPY_1_7_API_VERSION')],
+        # language='c++',
+    ),
+    Extension(
+        'util._geos',
+        sources=['util/_geos.pyx'],
+        include_dirs=[
+            np.get_include(),
+            os.path.dirname(__file__),
+            os.path.join(os.path.dirname(__file__), 'util'),
+        ],
+        define_macros=[('NPY_NO_DEPRECATED_API', 'NPY_1_7_API_VERSION')],
+        # language='c++',
+    )
+    # Extension(
+    #     'util.test',
+    #     sources=['util/test.pyx'],
+    #     include_dirs=[
+    #         np.get_include(),
+    #         os.path.dirname(__file__),
+    #         os.path.join(os.path.dirname(__file__), 'util'),
+    #         os.path.join(os.path.dirname(__file__), 'util/pygeos/src'),
+    #         os.path.join(os.path.dirname(__file__), 'util/pygeos'),
+    #     ],
+    #     define_macros=[('NPY_NO_DEPRECATED_API', 'NPY_1_7_API_VERSION')],
+    # ),
 ]
 
 setup(

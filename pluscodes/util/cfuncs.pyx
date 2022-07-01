@@ -1,3 +1,5 @@
+import geopandas as gpd
+
 import shapely.geometry
 import math
 cimport cython
@@ -129,6 +131,7 @@ cdef  np.ndarray get_strings(
             x //= BASE
             y //= BASE
 
+        # print(string[:strlen+1].decode('utf-8'))
         codes[i] = string[:strlen+1].decode('utf-8')
 
     free(string)
@@ -242,8 +245,7 @@ cdef get_bound(
 # @cython.wraparound(False)
 # @cython.nonecheck(False)
 cdef np.ndarray[F64, ndim=2] get_bounds(
-# def get_bounds(
-        unsigned long[:] lx,
+    unsigned long[:] lx,
     unsigned long[:] ly,
     unsigned char[:] lengths,
 ):
@@ -270,14 +272,10 @@ cdef np.ndarray[F64, ndim=2] get_bounds(
         lat_resolutions[l] = GRID_SIZE_DEGREES / pow(<unsigned long> GRID_ROWS, l)
         lon_resolutions[l] = GRID_SIZE_DEGREES / pow(<unsigned long> GRID_COLUMNS, l)
 
-
+    print(f'bounds lengths: {set(lengths)}')
 
     for r in range(lx.size):
-        try:
-            l = lengths[r] - PAIR_LENGTH
-        except IndexError:
-            print(f'r={r}')
-            raise IndexError
+        l = lengths[r] - PAIR_LENGTH
             # raise
         bv[r, 0] = <double>(lx[r] // trim_lons[l]) / final_lon_precisions[l] - MAX_LON
         bv[r, 1] = <double>(ly[r] // trim_lats[l]) / final_lat_precisions[l] - MAX_LAT
@@ -336,10 +334,25 @@ cdef np.ndarray[F64, ndim=2] get_points(
 
     ...
 
-
-
-
-
-
-
-
+# cdef np.ndarray[UINT64, ndim=2] get_buffer(
+#     unsigned long px,
+#     unsigned long py,
+#     unsigned char length,
+# ):
+#     cdef unsigned long pointx, pointy
+#     cdef np.ndarray[UINT64, ndim=2] buffer = np.ndarray(shape=(1, 1), dtype=np.uint64)
+#     cdef unsigned long final_lat_precision = PAIR_PRECISION * pow(GRID_ROWS, length)
+#     cdef unsigned long final_lon_precision = PAIR_PRECISION * pow(GRID_COLUMNS, length)
+#     cdef unsigned long trim_lat = pow(<unsigned long> GRID_ROWS, GRID_LENGTH-length)
+#     cdef unsigned long trim_lon = pow(<unsigned long> GRID_COLUMNS, GRID_LENGTH-length)
+#     cdef unsigned long lat_resolution = GRID_SIZE_DEGREES / pow(<unsigned long> GRID_ROWS, length)
+#     cdef unsigned long lon_resolution = GRID_SIZE_DEGREES / pow(<unsigned long> GRID_COLUMNS, length)
+#
+#     ls = py // trim_lat
+#     lw = px // trim_lon
+#     ln = ls + 1
+#     le = lw + 1
+#
+#
+#
+#

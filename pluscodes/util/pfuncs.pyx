@@ -3,6 +3,7 @@ import numpy as np
 cimport numpy as np
 from numpy.typing import NDArray
 cimport util.cfuncs as cfuncs
+
 # cimport cfuncs
 
 cdef extern from '<util/globals.h>':
