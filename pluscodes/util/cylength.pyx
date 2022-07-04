@@ -7,13 +7,27 @@ from typing import Union
 import numpy as np
 cimport numpy as np
 import geopandas as gpd
-from .pygeos cimport *
+
+from .pygeos cimport (
+    PyGEOS_CreateGeometry,
+    PyGEOS_GetGEOSGeometry,
+    import_pygeos_c_api,
+)
+
+from ._geos cimport (
+    GEOSPreparedIntersects_r,
+    GEOSGeom_destroy_r,
+    get_geos_handle,
+    GEOSGeometry,
+    GEOSPreparedGeom_destroy_r,
+    GEOSContextHandle_t,
+    GEOSPreparedGeometry,
+    GEOSGeom_createPointFromXY_r,
+    GEOSPrepare_r
+)
 
 cdef extern from '<util/globals.h>':
-    const char SEP = '+';
-    const char *ALPHABET = "23456789CFGHJMPQRVWX";
-    const char PAD
-
+    const char* ALPHABET
     const size_t SEP_POS
     const size_t BASE
     const size_t MAX_DIGITS
@@ -22,41 +36,30 @@ cdef extern from '<util/globals.h>':
     const size_t GRID_COLUMNS
     const size_t GRID_ROWS
     const size_t MIN_TRIMMABLE_CODE_LEN
-
     const int MAX_LAT
     const int MAX_LON
     const double GRID_SIZE_DEGREES
-
-    const int DEBUG = 5;
-
-    const unsigned long PAIR_PRECISION_FIRST_VALUE
-    const unsigned long PAIR_PRECISION
-    const unsigned long GRID_LAT_FIRST_PLACE_VALUE
-    const unsigned long GRID_LON_FIRST_PLACE_VALUE
-    const unsigned long FINAL_LAT_PRECISION
-    const unsigned long FINAL_LON_PRECISION
-
-    const double GRID_LAT_RESOLUTION
-    const double GRID_LON_RESOLUTION
-
+    unsigned long PAIR_PRECISION
     const size_t L
-    # const size_t L = GRID_LENGTH + 1;
+
+
 
 ctypedef np.uint8_t UINT8
 ctypedef np.float64_t F64
 ctypedef np.uint8_t BOOL
-# cdef const size_t L = GRID_LENGTH + 1
 
-
-cdef unsigned long[L] FINAL_LON_PRECISIONS
-cdef unsigned long[L] FINAL_LAT_PRECISIONS
-cdef unsigned long[L] TRIM_LONS
-cdef unsigned long[L] TRIM_LATS
-cdef double[L] LAT_RESOLUTIONS
-cdef double[L] LON_RESOLUTIONS
+# TODO: hardcoding 6 has a bad smell, is there a proper way to handle this such that each call to get_lengths
+#   mustn't define the arrays at a local level?
+cdef unsigned long[6] FINAL_LON_PRECISIONS
+cdef unsigned long[6] FINAL_LAT_PRECISIONS
+cdef unsigned long[6] TRIM_LONS
+cdef unsigned long[6] TRIM_LATS
+cdef double[6] LAT_RESOLUTIONS
+cdef double[6] LON_RESOLUTIONS
 
 cdef size_t n
-for n in range(GRID_LENGTH + 1):
+
+for n in range(6):
     FINAL_LAT_PRECISIONS[n] = PAIR_PRECISION * pow(GRID_ROWS, n)
     FINAL_LON_PRECISIONS[n] = PAIR_PRECISION * pow(GRID_COLUMNS, n)
     TRIM_LATS[n] = pow(<unsigned long> GRID_ROWS, GRID_LENGTH - n)
@@ -64,7 +67,6 @@ for n in range(GRID_LENGTH + 1):
     LAT_RESOLUTIONS[n] = GRID_SIZE_DEGREES / pow(<unsigned long> GRID_ROWS, n)
     LON_RESOLUTIONS[n] = GRID_SIZE_DEGREES / pow(<unsigned long> GRID_COLUMNS, n)
 
-from ._geos cimport *
 
 import_pygeos_c_api()
 
@@ -81,6 +83,7 @@ cdef inline bint contained(const Footprint footprint, unsigned char grid_length,
     s = <double> (footprint.py // TRIM_LATS[grid_length]) / FINAL_LAT_PRECISIONS[grid_length] - MAX_LAT
     e = w + LON_RESOLUTIONS[grid_length]
     n = s + LAT_RESOLUTIONS[grid_length]
+
 
     point = GEOSGeom_createPointFromXY_r(handle, w, s)
     intersects = GEOSPreparedIntersects_r(handle, footprint.geom, point)
@@ -158,4 +161,3 @@ def get_lengths( footprints: Union[gpd.GeoSeries, gpd.GeoDataFrame] ) -> NDArray
             GEOSPreparedGeom_destroy_r(handle, prepared)
 
     return lengths
-

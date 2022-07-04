@@ -7,10 +7,9 @@ cimport util.cfuncs as cfuncs
 # cimport cfuncs
 
 cdef extern from '<util/globals.h>':
-    pass
+    char *ALPHABET
     char SEP
     unsigned int SEP_POS
-    char * ALPHABET
     unsigned int BASE
     char PAD
     unsigned int MAX_LAT
