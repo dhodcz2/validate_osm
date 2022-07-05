@@ -1,4 +1,7 @@
 import cython
+from geopandas import GeoDataFrame, GeoSeries
+from pandas import Series, DataFrame
+
 from cpython cimport PyObject
 cimport cython
 from numpy.typing import NDArray
@@ -7,25 +10,42 @@ from typing import Union
 import numpy as np
 cimport numpy as np
 import geopandas as gpd
+# from libc.stdlib cimport malloc, free
 
 from .pygeos cimport (
-    PyGEOS_CreateGeometry,
-    PyGEOS_GetGEOSGeometry,
-    import_pygeos_c_api,
+PyGEOS_CreateGeometry,
+PyGEOS_GetGEOSGeometry,
+import_pygeos_c_api,
 )
+from pygeos._geos cimport (
+get_geos_handle,
+)
+
 
 from ._geos cimport (
+    GEOSPreparedGeometry,
+    GEOSGeometry,
+    GEOSPrepare,
+    GEOSContextHandle_t,
+
     GEOSPreparedIntersects_r,
     GEOSGeom_destroy_r,
-    get_geos_handle,
-    GEOSGeometry,
+    # get_geos_handle,
     GEOSPreparedGeom_destroy_r,
-    GEOSContextHandle_t,
-    GEOSPreparedGeometry,
     GEOSGeom_createPointFromXY_r,
-    GEOSPrepare_r
+    GEOSPrepare_r,
+    GEOS_init_r,
+
+    GEOSPreparedIntersects,
+    GEOSGeom_destroy,
+    GEOSPreparedGeom_destroy,
+    GEOSGeom_createPointFromXY,
+    GEOSPrepare,
+
+
 )
 
+import_pygeos_c_api()
 cdef extern from '<util/globals.h>':
     const char* ALPHABET
     const size_t SEP_POS
@@ -67,51 +87,57 @@ for n in range(6):
     LAT_RESOLUTIONS[n] = GRID_SIZE_DEGREES / pow(<unsigned long> GRID_ROWS, n)
     LON_RESOLUTIONS[n] = GRID_SIZE_DEGREES / pow(<unsigned long> GRID_COLUMNS, n)
 
-
-import_pygeos_c_api()
-
 cdef struct Footprint:
     double bw, bs, be, bn, px, py
-    const GEOSPreparedGeometry *geom
-
-cdef inline bint contained(const Footprint footprint, unsigned char grid_length, GEOSContextHandle_t handle) nogil:
-    cdef double w, s, n, e
-    cdef GEOSGeometry *point
-    cdef bint intersects
-
-    w = <double> (footprint.px // TRIM_LONS[grid_length]) / FINAL_LON_PRECISIONS[grid_length] - MAX_LON
-    s = <double> (footprint.py // TRIM_LATS[grid_length]) / FINAL_LAT_PRECISIONS[grid_length] - MAX_LAT
-    e = w + LON_RESOLUTIONS[grid_length]
-    n = s + LAT_RESOLUTIONS[grid_length]
+    const GEOSPreparedGeometry *prepared
 
 
-    point = GEOSGeom_createPointFromXY_r(handle, w, s)
-    intersects = GEOSPreparedIntersects_r(handle, footprint.geom, point)
-    GEOSGeom_destroy_r(handle, point)
-    if not intersects:
-        return False
+@cython.boundscheck(False)
+@cython.wraparound(False)
+def get_lengths(
+        footprints: Union[GeoSeries, GeoDataFrame],
+        bounds: Optional[NDArray[float]] = None,
+        points: Optional[GeoSeries] = None,
+) -> NDArray[np.uint8]:
+    cdef double[:] wv, sv, nv, ev, px, py
+    cdef Py_ssize_t n, i
+    cdef np.ndarray[UINT8, ndim=1] lengths = np.ndarray((len(footprints),), dtype=np.uint8)
+    cdef unsigned char [:] lv = lengths
+    cdef GEOSGeometry *geom = NULL
+    cdef const GEOSPreparedGeometry *prepared = NULL
+    cdef Footprint footprint
+    cdef char c
+    cdef GEOSContextHandle_t h
 
-    point = GEOSGeom_createPointFromXY_r(handle, e, s)
-    intersects = GEOSPreparedIntersects_r(handle, footprint.geom, point)
-    GEOSGeom_destroy_r(handle, point)
-    if not intersects:
-        return False
 
-    point = GEOSGeom_createPointFromXY_r(handle, w, n)
-    intersects = GEOSPreparedIntersects_r(handle, footprint.geom, point)
-    GEOSGeom_destroy_r(handle, point)
-    if not intersects:
-        return False
+    footprints = footprints.to_crs(4326)
+    cdef object [:] objects = footprints.geometry.values.data
 
-    point = GEOSGeom_createPointFromXY_r(handle, e, n)
-    intersects = GEOSPreparedIntersects_r(handle, footprint.geom, point)
-    GEOSGeom_destroy_r(handle, point)
-    if not intersects:
-        return False
+    if bounds is not None:
+        bw, bs, be, bn = bounds
+    else:
+        bw, bs, be, bn = footprints.bounds.T.values
+    if points is not None:
+        px = points.x.values
+        py = points.y.values
+    else:
+        points = footprints.representative_point().geometry
+        px = points.x.values
+        py = points.y.values
 
-    return True
+    for i in range(len(footprints)):
+        c = PyGEOS_GetGEOSGeometry(<PyObject *> objects[i], &geom)
+        if c == 0:
+            raise ValueError("Could not get GEOSGeometry")
+        prepared = GEOSPrepare(geom)
 
-cdef unsigned char get_length(const Footprint footprint, GEOSContextHandle_t handle) nogil:
+        footprint = Footprint(bw[i], bs[i], be[i], bn[i], px[i], py[i], prepared)
+        lv[i] = get_length(footprint)
+        GEOSPreparedGeom_destroy(prepared)
+
+    return lengths
+
+cdef unsigned char get_length(const Footprint footprint) nogil:
     cdef unsigned char length = 0
     cdef double dw, dh
     dw = footprint.be - footprint.bw
@@ -125,39 +151,51 @@ cdef unsigned char get_length(const Footprint footprint, GEOSContextHandle_t han
         raise ValueError('footprint bounds too small')
 
     while length <= GRID_LENGTH:
-        if contained(footprint, length, handle):
+        if contained(footprint, length):
             break
         length += 1
     else:
         raise ValueError('footprint point not containable')
 
+    return PAIR_LENGTH + length
 
-@cython.boundscheck(False)
-def get_lengths( footprints: Union[gpd.GeoSeries, gpd.GeoDataFrame] ) -> NDArray[np.uint8]:
-    cdef double[:] wv, sv, nv, ev, xv, yv
-    cdef Py_ssize_t n, i
-    cdef np.ndarray[UINT8, ndim=1] lengths = np.ndarray((len(footprints),), dtype=np.uint8)
-    cdef unsigned char [:] lv = lengths
-    cdef GEOSGeometry *geom = NULL
-    cdef const GEOSPreparedGeometry *prepared
-    cdef Footprint footprint
-    cdef char c
+cdef inline bint contained(
+        const Footprint footprint,
+        unsigned char grid_length,
+) nogil:
+    cdef double w, s, n, e
+    cdef GEOSGeometry *point
+    cdef bint intersects
 
-    footprints = footprints.to_crs(4326)
-    points = footprints.representative_point().geometry.values.data
-    cdef object [:] objects = footprints.geometry.values.data
+    w = <double> (footprint.px // TRIM_LONS[grid_length]) / FINAL_LON_PRECISIONS[grid_length] - MAX_LON
+    s = <double> (footprint.py // TRIM_LATS[grid_length]) / FINAL_LAT_PRECISIONS[grid_length] - MAX_LAT
+    e = w + LON_RESOLUTIONS[grid_length]
+    n = s + LAT_RESOLUTIONS[grid_length]
 
-    xv = points.x.values
-    yv = points.y.values
-    bw, bs, be, bn = footprints.bounds.T.values
+    point = GEOSGeom_createPointFromXY(w, s)
 
-    with get_geos_handle() as handle:
-        for i in range(len(footprints)):
-            if PyGEOS_GetGEOSGeometry(<PyObject *>objects[i], &geom) == 0:
-                raise TypeError
-            prepared = GEOSPrepare_r(handle, geom)
-            footprint = Footprint(bw[i], bs[i], be[i], bn[i], xv[i], yv[i], prepared)
-            lv[i] = get_length(footprint, handle)
-            GEOSPreparedGeom_destroy_r(handle, prepared)
+    intersects = GEOSPreparedIntersects(footprint.prepared, point)
+    GEOSGeom_destroy(point)
+    if not intersects:
+        return False
 
-    return lengths
+    point = GEOSGeom_createPointFromXY(e, s)
+    intersects = GEOSPreparedIntersects(footprint.prepared, point)
+    GEOSGeom_destroy(point)
+    if not intersects:
+        return False
+
+    point = GEOSGeom_createPointFromXY(w, n)
+    intersects = GEOSPreparedIntersects(footprint.prepared, point)
+    GEOSGeom_destroy(point)
+    if not intersects:
+        return False
+
+    point = GEOSGeom_createPointFromXY(e, n)
+    intersects = GEOSPreparedIntersects(footprint.prepared, point)
+    GEOSGeom_destroy(point)
+    if not intersects:
+        return False
+
+    return True
+
