@@ -1,4 +1,8 @@
 import cython
+import math
+from cpython.object cimport PyObject
+from cpython.ref cimport Py_INCREF
+from typing import Optional
 import numpy
 from geopandas import GeoDataFrame, GeoSeries
 from pandas import Series, DataFrame
@@ -14,34 +18,34 @@ import geopandas as gpd
 from libc.stdlib cimport malloc, free
 
 from .pygeos cimport (
-PyGEOS_CreateGeometry,
-PyGEOS_GetGEOSGeometry,
-import_pygeos_c_api,
+    PyGEOS_CreateGeometry,
+    PyGEOS_GetGEOSGeometry,
+    import_pygeos_c_api,
 )
 from pygeos._geos cimport (
-get_geos_handle,
+    get_geos_handle,
 )
 
 
 from ._geos cimport (
-GEOSPreparedGeometry,
-GEOSGeometry,
-GEOSPrepare,
-GEOSContextHandle_t,
+    GEOSPreparedGeometry,
+    GEOSGeometry,
+    GEOSPrepare,
+    GEOSContextHandle_t,
 
-GEOSPreparedIntersects_r,
-GEOSGeom_destroy_r,
-# get_geos_handle,
-GEOSPreparedGeom_destroy_r,
-GEOSGeom_createPointFromXY_r,
-GEOSPrepare_r,
-GEOS_init_r,
+    GEOSPreparedIntersects_r,
+    GEOSGeom_destroy_r,
+    # get_geos_handle,
+    GEOSPreparedGeom_destroy_r,
+    GEOSGeom_createPointFromXY_r,
+    GEOSPrepare_r,
+    GEOS_init_r,
 
-GEOSPreparedIntersects,
-GEOSGeom_destroy,
-GEOSPreparedGeom_destroy,
-GEOSGeom_createPointFromXY,
-GEOSPrepare,
+    GEOSPreparedIntersects,
+    GEOSGeom_destroy,
+    GEOSPreparedGeom_destroy,
+    GEOSGeom_createPointFromXY,
+    GEOSPrepare,
 
 
 )
@@ -71,23 +75,37 @@ cdef extern from '<util/globals.h>':
     const double GRID_SIZE_DEGREES
     unsigned long PAIR_PRECISION
     const size_t L
+    unsigned long FINAL_LAT_PRECISION
+    unsigned long FINAL_LON_PRECISION
+
 
 
 
 ctypedef np.uint8_t UINT8
+ctypedef np.uint64_t UINT64
 ctypedef np.float64_t F64
 ctypedef np.uint8_t BOOL
 
 # TODO: hardcoding 6 has a bad smell, is there a proper way to handle this such that each call to get_lengths
 #   mustn't define the arrays at a local level?
-cdef unsigned long[6] FINAL_LON_PRECISIONS
-cdef unsigned long[6] FINAL_LAT_PRECISIONS
-cdef unsigned long[6] TRIM_LONS
-cdef unsigned long[6] TRIM_LATS
-cdef double[6] LAT_RESOLUTIONS
-cdef double[6] LON_RESOLUTIONS
-
-cdef size_t n
+# cdef unsigned long[6] FINAL_LON_PRECISIONS
+# cdef unsigned long[6] FINAL_LAT_PRECISIONS
+# cdef unsigned long[6] TRIM_LONS
+# cdef unsigned long[6] TRIM_LATS
+# cdef double[6] LAT_RESOLUTIONS
+# cdef double[6] LON_RESOLUTIONS
+#
+# cdef size_t n
+cdef :
+    unsigned long[6] FINAL_LON_PRECISIONS
+    unsigned long[6] FINAL_LAT_PRECISIONS
+    unsigned long[6] TRIM_LONS
+    unsigned long[6] TRIM_LATS
+    double[6] LAT_RESOLUTIONS
+    double[6] LON_RESOLUTIONS
+    unsigned long[6] XSTEPS
+    unsigned long[6] YSTEPS
+    size_t n
 
 for n in range(6):
     FINAL_LAT_PRECISIONS[n] = PAIR_PRECISION * pow(GRID_ROWS, n)
@@ -96,73 +114,93 @@ for n in range(6):
     TRIM_LONS[n] = pow(<unsigned long> GRID_COLUMNS, GRID_LENGTH - n)
     LAT_RESOLUTIONS[n] = GRID_SIZE_DEGREES / pow(<unsigned long> GRID_ROWS, n)
     LON_RESOLUTIONS[n] = GRID_SIZE_DEGREES / pow(<unsigned long> GRID_COLUMNS, n)
+    XSTEPS[n] = pow(GRID_COLUMNS, GRID_LENGTH - n)
+    YSTEPS[n] = pow(GRID_ROWS, GRID_LENGTH - n)
 
 cdef struct Footprint:
     GEOSPreparedGeometry *prepared
-    unsigned char * accepted, contained, visited
-    double * w,s
+    unsigned char * accepted, *contained
+    # double * tw,ts
     size_t xtiles, ytiles, xpoints, ypoints
+    double *ftw, *fts
+    unsigned long *ltw, *lts
 
-cdef Footprint footprint_init(GEOSGeometry *g, double w, double s, double e, double n, size_t length):
-    cdef size_t dw, dh, size, i, j
-    cdef unsigned long xstep = pow(GRID_COLUMNS, MAX_DIGITS - length)
-    cdef unsigned long ystep = pow(GRID_ROWS, MAX_DIGITS - length)
+cdef Footprint footprint_init(
+        GEOSGeometry *g,
+        unsigned long bw,
+        unsigned long bs,
+        unsigned long be,
+        unsigned long bn,
+        size_t grid_length
+):
+    cdef :
+        size_t dw, dh, size, i, j
+        # unsigned long xstep = pow(GRID_COLUMNS, GRID_LENGTH - grid_length)
+        # unsigned long ystep = pow(GRID_ROWS, GRID_LENGTH - grid_length)
+        unsigned long xstep = XSTEPS[grid_length]
+        unsigned long ystep = YSTEPS[grid_length]
 
-    cdef unsigned long trim_lon = TRIM_LONS[length]
-    cdef unsigned long trim_lat = TRIM_LATS[length]
-    cdef unsigned long final_lon_precision = FINAL_LON_PRECISIONS[length]
-    cdef unsigned long final_lat_precision = FINAL_LAT_PRECISIONS[length]
+        unsigned long trim_lon = TRIM_LONS[grid_length]
+        unsigned long trim_lat = TRIM_LATS[grid_length]
+        unsigned long final_lon_precision = FINAL_LON_PRECISIONS[grid_length]
+        unsigned long final_lat_precision = FINAL_LAT_PRECISIONS[grid_length]
 
+        unsigned long xtiles = (be // xstep) -  (bw // xstep)
+        unsigned long ytiles = (bn // ystep) - (bs // ystep)
 
-    cdef unsigned long xtiles = footprint.e // xstep - footprint.w // xstep
-    cdef unsigned long ytiles = footprint.n // ystep - footprint.s // ystep
-    cdef unsigned long tiles = xtiles * ytiles
+        unsigned long tiles = xtiles * ytiles
 
-    cdef unsigned long xpoints = xtiles + 2
-    cdef unsigned long ypoints = ytiles + 2
-    cdef unsigned long points = xpoints * ypoints
+        unsigned long xpoints = xtiles + 1
+        unsigned long ypoints = ytiles + 1
+        unsigned long points = xpoints * ypoints
 
-    cdef double* w = malloc(xtiles * sizeof(double))
-    cdef double* s = malloc(ytiles * sizeof(double))
+        double* ftw = <double *>malloc(xpoints * sizeof(double))
+        double* fts = <double *>malloc(ypoints * sizeof(double))
+        unsigned long* ltw = <unsigned long *>malloc(xpoints * sizeof(unsigned long))
+        unsigned long* lts = <unsigned long *>malloc(ypoints * sizeof(unsigned long))
 
+    print('xpoints:', xpoints)
     for i in range(xpoints):
-        w[i] = <double> (
-                footprint.w + i * xstep // trim_lon
-        ) / final_lon_precision - MAX_LON
+        ltw[i] = (bw + i * xstep + xstep) // trim_lon
+        ftw[i] = <double> ltw[i] / final_lon_precision - MAX_LON
+        # print(round(ftw[i], 2), end=" ",)
+
+    print('ypoints:', ypoints)
     for i in range(ypoints):
-        s[i] = <double> (
-                footprint.s + i * ystep // trim_lat
-        ) / final_lat_precision - MAX_LAT
+        lts[i] = (bs + i * ystep + ystep) // trim_lat
+        fts[i] = <double> lts[i] / final_lat_precision - MAX_LAT
+        # print(round(fts[i], 2), end=" ",)
 
-    cdef unsigned char* contained = malloc(points * sizeof(unsigned char))
-    cdef unsigned char* accepted = malloc(points * sizeof(unsigned char))
-    cdef unsigned char* visited = malloc(points * sizeof(unsigned char))
-
+    cdef unsigned char* contained = <unsigned char*> malloc(points * sizeof(unsigned char))
+    cdef unsigned char* accepted = <unsigned char *> malloc(points * sizeof(unsigned char))
     return Footprint(
-        w=w, s=s,
+        ltw=ltw,
+        lts=lts,
+        ftw=ftw,
+        fts=fts,
         prepared=GEOSPrepare(g),
         accepted=accepted,
         contained=contained,
-        visited=visited,
         xtiles=xtiles, ytiles=ytiles, xpoints=xpoints, ypoints=ypoints,
     )
 
-cdef void footprint_destroy(Footprint &f):
-    free(f.visited)
+cdef inline void footprint_destroy(Footprint f):
     free(f.accepted)
     free(f.contained)
-    free(f.w)
-    free(f.s)
+    free(f.ftw)
+    free(f.fts)
+    free(f.ltw)
+    free(f.lts)
     GEOSPreparedGeom_destroy(f.prepared)
 
 def get_list_tiles(
         gdf: Union[GeoDataFrame, GeoSeries],
         unsigned char[:] lengths,
         bounds: Optional[NDArray[float]] = None,
-) -> NDArray[np.uint64]:
+) -> list[NDArray[np.uint64]]:
     cdef Py_ssize_t n, size, i
-    cdef NDArray[F64, ndim=1] fw, fs, fe, fn,
-    cdef double[:] vw, vs, ve, vn
+    cdef np.ndarray[F64, ndim=1] fw, fs, fe, fn,
+    cdef unsigned long[:] vw, vs, ve, vn
 
     cdef GEOSGeometry *geom = NULL
     cdef const GEOSPreparedGeometry *prepared = NULL
@@ -173,11 +211,13 @@ def get_list_tiles(
     gdf = gdf.to_crs(epsg=4326)
     points = gdf.representative_point().geometry
     size = len(gdf)
+    cdef object [:] objects = gdf.geometry.values.data
 
     if bounds is not None:
         bw, bs, be, bn = bounds
     else:
-        fw, fs, fn, fe = gdf.bounds.T.values
+        # fw, fs, fn, fe = gdf.bounds.T.values
+        fw, fs, fe, fn = gdf.bounds.values.T
         vw = np.ndarray.astype((
             (fw + MAX_LON) * FINAL_LON_PRECISION
         ), dtype=np.uint64)
@@ -190,46 +230,72 @@ def get_list_tiles(
         vn = np.ndarray.astype((
             (fn + MAX_LAT) * FINAL_LAT_PRECISION
         ), dtype=np.uint64)
+        print(fw[i], fs[i], fe[i], fn[i])
+        # print(f'[%d, %d, %d, %d]' % (fw[i], fs[i], fe[i], fn[i]))
 
-
-    list_tiles = PyList_New(size)
+    list_tiles: list[NDArray[np.uint64]] = PyList_New(size)
     for i in range(size):
-        geom = PyGEOS_CreateGeometry(points.values[i])
-        footprint = footprint_init(geom, vw[i], vs[i], ve[i], vn[i], lengths[i])
-        PyList_SET_ITEM(list_tiles, i, get_tile(footprint, lengths[i]))
+        c = PyGEOS_GetGEOSGeometry(<PyObject *> objects[i], &geom)
+        if c == 0:
+            raise ValueError("Could not get GEOS geometry")
+        footprint = footprint_init(
+            g=geom,
+            bw=vw[i],
+            bs=vs[i],
+            be=ve[i],
+            bn=vn[i],
+            grid_length=lengths[i] - PAIR_LENGTH,
+        )
+        tiles = get_tiles(footprint)
+        Py_INCREF(tiles)
+        PyList_SET_ITEM(list_tiles, i, tiles)
         footprint_destroy(footprint)
-
+        return list_tiles
+    print('return list_tiles')
     return list_tiles
 
-# cdef np.ndarray[UINT64, ndim=2] get_tiles( Footprint footprint, ) nogil:
-#
-#     cdef size_t nout = 0
-#     for i in range(1, ytiles):
-#         for j in range(1, xtiles):
-#             k = i * xcount + j
-#             nout += accept(k, contained, visited, accepted)
-#
-#     cdef np.ndarray[UINT64, ndim=2] out = np.ndarray((nout, 2), dtype=np.uint64)
-#     cdef size_t out_i = 0
-#     for i in range(1, ytiles):
-#         for j in range(1, xtiles):
-#             k = i * xcount + j
-#             if contained[k]:
-#                 out[out_i, 0] = w[i]
-#                 out[out_i, 1] = s[j]
-#                 out_i += 1
-#     assert out_i == nout
-#
-#     free(lx)
-#     free(ly)
-#
-# cdef inline char accept(
-#         Footprint footprint,
-#         unsigned long k,
-# ) nogil:
-#     ...
 
-cdef np.ndarray[UINT64, ndim=2] get_tiles(Footprint footprint) nogil:
-    cdef size_t nout = 0
-    cdef size_t i, j, k
+cdef np.ndarray get_tiles(const Footprint f):
+    cdef :
+        size_t r, c, k, n, nout
+        GEOSGeometry *point
+
+
+    for c in range(f.xpoints):
+        for r in range(f.ypoints):
+            k = c * f.ypoints + r
+            point = GEOSGeom_createPointFromXY(f.ftw[c], f.fts[r])
+            intersects = GEOSPreparedIntersects(f.prepared, point)
+            GEOSGeom_destroy(point)
+            f.contained[k] = intersects
+
+    nout = 0
+    for c in range(f.xtiles):
+        for r in range(f.ytiles):
+            if (
+                f.contained[c * f.ypoints + r] and
+                f.contained[c * f.ypoints + r + 1] and
+                f.contained[(c + 1) * f.ypoints + r] and
+                f.contained[(c + 1) * f.ypoints + r + 1]
+            ):
+                nout += 1
+                f.accepted[k] = 1
+
+    cdef np.ndarray[UINT64, ndim=2] out = np.ndarray((nout, 2), dtype=np.uint64)
+
+    cdef unsigned long[:, :] ov  = out
+    n = 0
+    for c in range(f.xtiles):
+        for r in range(f.ytiles):
+            k = c * f.ypoints + r
+            if f.accepted[k]:
+                ov[n, 0] = f.ltw[r]
+                ov[n, 1] = f.lts[c]
+                n += 1
+    assert n == nout
+
+    return out
+
+
+
 

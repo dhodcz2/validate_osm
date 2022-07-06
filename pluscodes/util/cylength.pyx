@@ -1,4 +1,5 @@
 import cython
+from typing import Optional
 from geopandas import GeoDataFrame, GeoSeries
 from pandas import Series, DataFrame
 
@@ -109,7 +110,6 @@ def get_lengths(
     cdef char c
     cdef GEOSContextHandle_t h
 
-
     footprints = footprints.to_crs(4326)
     cdef object [:] objects = footprints.geometry.values.data
 
@@ -159,10 +159,7 @@ cdef unsigned char get_length(const Footprint footprint) nogil:
 
     return PAIR_LENGTH + length
 
-cdef inline bint contained(
-        const Footprint footprint,
-        unsigned char grid_length,
-) nogil:
+cdef inline bint contained( const Footprint footprint, unsigned char grid_length, ) nogil:
     cdef double w, s, n, e
     cdef GEOSGeometry *point
     cdef bint intersects
