@@ -1,5 +1,8 @@
 import cython
 import math
+
+import pandas as pd
+import pygeos.creation
 from cpython.object cimport PyObject
 from cpython.ref cimport Py_INCREF
 from typing import Optional
@@ -25,6 +28,7 @@ from .pygeos cimport (
 from pygeos._geos cimport (
     get_geos_handle,
 )
+cimport util.cfuncs as cfuncs
 
 
 from ._geos cimport (
@@ -118,14 +122,16 @@ for n in range(6):
     YSTEPS[n] = pow(GRID_ROWS, GRID_LENGTH - n)
 
 cdef struct Footprint:
-    GEOSPreparedGeometry *prepared
-    unsigned char * accepted, *contained
-    # double * tw,ts
+    const GEOSPreparedGeometry *prepared
+    unsigned char *accepted
+    unsigned char *contained
     size_t xtiles, ytiles, xpoints, ypoints
-    double *ftw, *fts
-    unsigned long *ltw, *lts
+    double *ftw
+    double *fts
+    unsigned long *ltw
+    unsigned long *lts
 
-cdef Footprint footprint_init(
+cdef Footprint Footprint_init(
         GEOSGeometry *g,
         unsigned long bw,
         unsigned long bs,
@@ -159,17 +165,13 @@ cdef Footprint footprint_init(
         unsigned long* ltw = <unsigned long *>malloc(xpoints * sizeof(unsigned long))
         unsigned long* lts = <unsigned long *>malloc(ypoints * sizeof(unsigned long))
 
-    print('xpoints:', xpoints)
     for i in range(xpoints):
         ltw[i] = (bw + i * xstep + xstep) // trim_lon
         ftw[i] = <double> ltw[i] / final_lon_precision - MAX_LON
-        # print(round(ftw[i], 2), end=" ",)
 
-    print('ypoints:', ypoints)
     for i in range(ypoints):
         lts[i] = (bs + i * ystep + ystep) // trim_lat
         fts[i] = <double> lts[i] / final_lat_precision - MAX_LAT
-        # print(round(fts[i], 2), end=" ",)
 
     cdef unsigned char* contained = <unsigned char*> malloc(points * sizeof(unsigned char))
     cdef unsigned char* accepted = <unsigned char *> malloc(points * sizeof(unsigned char))
@@ -184,7 +186,7 @@ cdef Footprint footprint_init(
         xtiles=xtiles, ytiles=ytiles, xpoints=xpoints, ypoints=ypoints,
     )
 
-cdef inline void footprint_destroy(Footprint f):
+cdef inline void Footprint_destroy(Footprint f):
     free(f.accepted)
     free(f.contained)
     free(f.ftw)
@@ -197,13 +199,13 @@ def get_list_tiles(
         gdf: Union[GeoDataFrame, GeoSeries],
         unsigned char[:] lengths,
         bounds: Optional[NDArray[float]] = None,
-) -> list[NDArray[np.uint64]]:
+) -> list[np.ndarray]:
     cdef Py_ssize_t n, size, i
     cdef np.ndarray[F64, ndim=1] fw, fs, fe, fn,
     cdef unsigned long[:] vw, vs, ve, vn
 
     cdef GEOSGeometry *geom = NULL
-    cdef const GEOSPreparedGeometry *prepared = NULL
+    # cdef const GEOSPreparedGeometry *prepared = NULL
     cdef Footprint footprint
     cdef char c
     cdef GEOSContextHandle_t h
@@ -216,7 +218,6 @@ def get_list_tiles(
     if bounds is not None:
         bw, bs, be, bn = bounds
     else:
-        # fw, fs, fn, fe = gdf.bounds.T.values
         fw, fs, fe, fn = gdf.bounds.values.T
         vw = np.ndarray.astype((
             (fw + MAX_LON) * FINAL_LON_PRECISION
@@ -230,15 +231,13 @@ def get_list_tiles(
         vn = np.ndarray.astype((
             (fn + MAX_LAT) * FINAL_LAT_PRECISION
         ), dtype=np.uint64)
-        print(fw[i], fs[i], fe[i], fn[i])
-        # print(f'[%d, %d, %d, %d]' % (fw[i], fs[i], fe[i], fn[i]))
 
     list_tiles: list[NDArray[np.uint64]] = PyList_New(size)
     for i in range(size):
         c = PyGEOS_GetGEOSGeometry(<PyObject *> objects[i], &geom)
         if c == 0:
             raise ValueError("Could not get GEOS geometry")
-        footprint = footprint_init(
+        footprint = Footprint_init(
             g=geom,
             bw=vw[i],
             bs=vs[i],
@@ -246,16 +245,16 @@ def get_list_tiles(
             bn=vn[i],
             grid_length=lengths[i] - PAIR_LENGTH,
         )
-        tiles = get_tiles(footprint)
+        tiles = Footprint_getArray(footprint)
         Py_INCREF(tiles)
         PyList_SET_ITEM(list_tiles, i, tiles)
-        footprint_destroy(footprint)
-        return list_tiles
+        Footprint_destroy(footprint)
+
     print('return list_tiles')
     return list_tiles
 
 
-cdef np.ndarray get_tiles(const Footprint f):
+cdef np.ndarray Footprint_getArray(const Footprint f):
     cdef :
         size_t r, c, k, n, nout
         GEOSGeometry *point
@@ -272,8 +271,9 @@ cdef np.ndarray get_tiles(const Footprint f):
     nout = 0
     for c in range(f.xtiles):
         for r in range(f.ytiles):
+            k = c * f.ypoints + r
             if (
-                f.contained[c * f.ypoints + r] and
+                f.contained[k] and
                 f.contained[c * f.ypoints + r + 1] and
                 f.contained[(c + 1) * f.ypoints + r] and
                 f.contained[(c + 1) * f.ypoints + r + 1]
@@ -297,5 +297,58 @@ cdef np.ndarray get_tiles(const Footprint f):
     return out
 
 
+def get_geoseries_tiles(
+        gdf: Union[GeoDataFrame, GeoSeries],
+        # unsigned char[:] lengths,
+        np.ndarray[UINT8, ndim=1] lengths,
+        bounds: Optional[NDArray[float]] = None,
+) -> GeoSeries:
+    cdef :
+        size_t n, size, i, count, len_gdf, j
+        size_t *sizes
+        np.ndarray[UINT64, ndim=1] iloc
+        unsigned long[:] viloc
+        unsigned char[:] lengths_view = lengths
 
+    len_gdf = len(gdf)
 
+    list_longs: list[np.ndarray] = get_list_tiles(gdf, lengths_view, bounds)
+    longs = np.concatenate(list_longs, axis=0)
+    print('concatenate')
+
+    sizes = <size_t *> malloc(len_gdf * sizeof(size_t))
+    count = 0
+    for i in range(len_gdf):
+        sizes[i] = list_longs[i].shape[0]
+        count += sizes[i]
+
+    print('count', count)
+
+    iloc = np.ndarray((count,), dtype=np.uint64)
+    viloc = iloc
+
+    n = 0
+    for i in range(len_gdf):
+        for j in range(sizes[i]):
+            viloc[n] = i
+            n += 1
+    print('len(iloc)', len(iloc))
+
+    free(sizes)
+
+    lengths = lengths[iloc]
+    print('len(lengths)', len(lengths))
+    strings = cfuncs.get_strings(longs[:, 0], longs[:, 1], lengths)
+    print('get_strings')
+    strings = strings[iloc]
+    index = pd.MultiIndex.from_arrays((
+        iloc, strings,
+    ), names=('index', 'tile'),)
+    print('len(index)', len(index))
+
+    bounds = cfuncs.get_bounds(longs[:, 0], longs[:, 1], lengths)
+    data = pygeos.creation.box( bounds[:, 0], bounds[:, 1], bounds[:, 2], bounds[:, 3] )
+
+    result = GeoSeries(data=data, index=index, crs=4326)
+    print('return get_geoseries_tiles')
+    return result
