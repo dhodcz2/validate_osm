@@ -22,121 +22,15 @@ cimport numpy as np
 import geopandas as gpd
 from libc.stdlib cimport malloc, free
 
-from .pygeos cimport (
-    PyGEOS_CreateGeometry,
-    PyGEOS_GetGEOSGeometry,
-    import_pygeos_c_api,
-
-)
-
-import_pygeos_c_api()
 cimport util.cfuncs as cfuncs
 
-from ._geos cimport (
-    get_geos_handle,
+
+from ._geos cimport *
+
+from pygeos._pygeos_api cimport (
+    import_pygeos_c_api,
+    PyGEOS_GetGEOSGeometry,
 )
-#
-# from ._geos cimport (
-#     GEOSEquals_r,
-#     GEOSGeomTypeId_r,
-#     GEOSPreparedGeometry,
-#     GEOSGeometry,
-#     GEOSPrepare,
-#     GEOSContextHandle_t,
-#     GEOSPreparedIntersects_r,
-#     GEOSPreparedContains,
-#     GEOSGeom_destroy_r,
-#     GEOSPreparedGeom_destroy_r,
-#     GEOSGeom_createPointFromXY_r,
-#     GEOSPrepare_r,
-#     GEOS_init_r,
-#     GEOSPreparedIntersects,
-#     GEOSPreparedDisjoint,
-#     GEOSGeom_destroy,
-#     GEOSPreparedGeom_destroy,
-#     GEOSGeom_createPointFromXY,
-#     GEOSPrepare,
-#     GEOSisValid,
-#     GEOSIntersects,
-#     GEOSEquals,
-#     GEOSGeom_clone,
-#     GEOSGetNumGeometries,
-#     GEOSGetGeometryN,
-#     GEOSisEmpty,
-#     get_geos_handle,
-#     GEOSFree,
-#     GEOSGeomType,
-#     GEOSGetNumGeometries_r,
-#     GEOSGeomTypeId,
-# )
-#
-cdef extern from 'geos_c.h':
-    ctypedef void *GEOSContextHandle_t
-    ctypedef struct GEOSGeometry
-    ctypedef struct GEOSPreparedGeometry
-    ctypedef struct GEOSCoordSequence
-    ctypedef void (*GEOSMessageHandler_r)(const char *message, void *data)
-
-    GEOSContextHandle_t GEOS_init_r() nogil
-    void GEOS_finish_r(GEOSContextHandle_t handle) nogil
-    void GEOSContext_setErrorMessageHandler_r(
-            GEOSContextHandle_t handle,
-            GEOSMessageHandler_r ef,
-            void* data,
-    ) nogil
-    void GEOSContext_setNoticeMessageHandler_r(
-            GEOSContextHandle_t handle,
-            GEOSMessageHandler_r nf,
-            void* data,
-    ) nogil
-
-
-    GEOSGeometry* GEOSGeom_createPointFromXY_r(GEOSContextHandle_t, double, double) nogil
-    GEOSPreparedGeometry* GEOSPrepare_r(GEOSContextHandle_t, const GEOSGeometry *) nogil
-    char GEOSIntersects_r(GEOSContextHandle_t, const GEOSGeometry*, const GEOSGeometry *) nogil
-    char GEOSPreparedIntersects_r(GEOSContextHandle_t, const GEOSPreparedGeometry*, const GEOSGeometry *) nogil
-    void GEOSGeom_destroy_r(GEOSContextHandle_t, GEOSGeometry *) nogil
-    void GEOSPreparedGeom_destroy_r(GEOSContextHandle_t, GEOSPreparedGeometry *) nogil
-    int GEOSGetNumGeometries_r(GEOSContextHandle_t, const GEOSGeometry *) nogil
-    char GEOSEquals_r(GEOSContextHandle_t, const GEOSGeometry*, const GEOSGeometry *) nogil
-    GEOSGeometry* GEOSGeom_clone_r(GEOSContextHandle_t, const GEOSGeometry *) nogil
-    const GEOSGeometry* GEOSGetGeometryN_r(GEOSContextHandle_t, const GEOSGeometry *, unsigned int) nogil
-
-
-    GEOSGeometry* GEOSGeom_createPointFromXY(double, double) nogil
-    GEOSPreparedGeometry* GEOSPrepare(const GEOSGeometry *) nogil
-    char GEOSIntersects(const GEOSGeometry*, const GEOSGeometry *) nogil
-    char GEOSContains(const GEOSGeometry*, const GEOSGeometry *) nogil
-    char GEOSPreparedIntersects(const GEOSPreparedGeometry*, const GEOSGeometry *) nogil
-    char GEOSPreparedContains(const GEOSPreparedGeometry*, const GEOSGeometry *) nogil
-    char GEOSPreparedDisjoint(const GEOSPreparedGeometry*, const GEOSGeometry *) nogil
-    void GEOSGeom_destroy(GEOSGeometry *) nogil
-    void GEOSPreparedGeom_destroy(GEOSPreparedGeometry *) nogil
-    char GEOSEquals(const GEOSGeometry*, const GEOSGeometry *) nogil
-    char GEOSisValid(const GEOSGeometry *) nogil
-    GEOSGeometry* GEOSGeom_clone(const GEOSGeometry *) nogil
-    char GEOSisEmpty(const GEOSGeometry *) nogil
-
-
-    const GEOSGeometry * GEOSGetGeometryN(const GEOSGeometry*, int) nogil
-    int GEOSGetNumGeometries(const GEOSGeometry *) nogil
-    int GEOSGeomTypeId(const GEOSGeometry *) nogil
-    int GEOSGeomTypeId_r(GEOSContextHandle_t, const GEOSGeometry *) nogil
-
-    char* GEOSGeomType(const GEOSGeometry *) nogil
-    void GEOSFree(void *buffer) nogil
-
-    GEOSGeometry* GEOSGeom_createEmptyPolygon_r(GEOSContextHandle_t) nogil
-    GEOSGeometry* GEOSGeom_createCollection_r(GEOSContextHandle_t, int, GEOSGeometry **, unsigned int) nogil
-    int GEOSGeomTypeId_r(GEOSContextHandle_t, const GEOSGeometry *) nogil
-    GEOSGeometry* GEOSGeom_clone_r(GEOSContextHandle_t, const GEOSGeometry *) nogil
-    GEOSGeometry* GEOSGeom_createPolygon_r(
-            GEOSContextHandle_t,
-            GEOSGeometry *,
-            GEOSGeometry **,
-            unsigned int,
-    ) nogil
-
 
 
 from cpython cimport (
@@ -148,7 +42,6 @@ from cpython cimport (
 cdef extern from 'Python.h':
     PyObject* Py_BuildValue(const char*, ...) except NULL
 
-# import_pygeos_c_api()
 cdef extern from '<util/globals.h>':
     const char* ALPHABET
     const size_t SEP_POS
@@ -174,6 +67,11 @@ ctypedef np.uint8_t UINT8
 ctypedef np.uint64_t UINT64
 ctypedef np.float64_t F64
 ctypedef np.uint8_t BOOL
+
+_import = import_pygeos_c_api()
+if _import == -1:
+    raise ImportError('Could not import pygeos C API')
+
 
 # TODO: hardcoding 6 has a bad smell, is there a proper way to handle this such that each call to get_lengths
 #   mustn't define the arrays at a local level?
@@ -553,6 +451,7 @@ def get_geoseries_tiles(
         np.ndarray[UINT8, ndim=1] lengths,
         bounds: Optional[NDArray[float]] = None,
 ) -> GeoSeries:
+    import_pygeos_c_api()
     cdef :
         size_t n, size, i, count, len_gdf, j
         size_t *sizes
@@ -598,247 +497,4 @@ def get_geoseries_tiles(
     result = GeoSeries(data=data, index=index, crs=4326)
     # print('return get_geoseries_tiles')
     return result
-
-
-# @cython.boundscheck(False)
-def get_parts(object[:] array, bint extract_rings=0):
-    cdef Py_ssize_t geom_idx = 0
-    cdef Py_ssize_t part_idx = 0
-    cdef Py_ssize_t idx = 0
-    cdef Py_ssize_t count
-    cdef GEOSGeometry *geom = NULL
-    cdef const GEOSGeometry *part = NULL
-
-    if extract_rings:
-        counts = pygeos.get_num_interior_rings(array)
-        is_polygon = (pygeos.get_type_id(array) == 3) & (~pygeos.is_empty(array))
-        counts += is_polygon
-        count = counts.sum()
-    else:
-        counts = pygeos.get_num_geometries(array)
-        count = counts.sum()
-    print(f'count: {count}')
-
-    if count == 0:
-        # return immediately if there are no geometries to return
-        return (
-            np.empty(shape=(0, ), dtype=object),
-            np.empty(shape=(0, ), dtype=np.intp)
-        )
-
-    parts = np.empty(shape=(count, ), dtype=object)
-    index = np.empty(shape=(count, ), dtype=np.intp)
-
-    cdef int[:] counts_view = counts
-    cdef object[:] parts_view = parts
-    cdef np.intp_t[:] index_view = index
-
-    with get_geos_handle() as geos_handle:
-        for geom_idx in range(array.size):
-            if counts_view[geom_idx] <= 0:
-                # No parts to return, skip this item
-                continue
-
-            if PyGEOS_GetGEOSGeometry(<PyObject *>array[geom_idx], &geom) == 0:
-                raise TypeError("One of the arguments is of incorrect type. "
-                                "Please provide only Geometry objects.")
-
-            if geom == NULL:
-                continue
-
-            print(f'counts_view: ', counts_view[geom_idx])
-            for part_idx in range(counts_view[geom_idx]):
-                index_view[idx] = geom_idx
-
-                if extract_rings:
-                    pass
-                    # part = GetRingN(geos_handle, geom, part_idx)
-                else:
-                    part = GEOSGetGeometryN_r(geos_handle, geom, part_idx)
-                print('got geometry')
-                if part == NULL:
-                    return  # GEOSException is raised by get_geos_handle
-
-                # clone the geometry to keep it separate from the inputs
-                part = GEOSGeom_clone_r(geos_handle, part)
-                print('cloned geometry')
-                if part == NULL:
-                    return  # GEOSException is raised by get_geos_handle
-
-                # cast part back to <GEOSGeometry> to discard const qualifier
-                # pending issue #227
-                parts_view[idx] = PyGEOS_CreateGeometry(<GEOSGeometry *>part, geos_handle)
-
-                idx += 1
-
-    # TODO: somehow the pygeos module is not failing but my util is
-    #   so we need to experiment with putting the code in pygeos
-    #   or changing our configuration
-    return parts, index
-
-def collections_1d(object geometries, object indices, int geometry_type = 7, object out = None):
-    """Converts geometries + indices to collections
-    Allowed geometry type conversions are:
-    - linearrings to polygons
-    - points to multipoints
-    - linestrings/linearrings to multilinestrings
-    - polygons to multipolygons
-    - any to geometrycollections
-    """
-    cdef Py_ssize_t geom_idx_1 = 0
-    cdef Py_ssize_t coll_idx = 0
-    cdef unsigned int coll_size = 0
-    cdef Py_ssize_t coll_geom_idx = 0
-    cdef GEOSGeometry *geom = NULL
-    cdef GEOSGeometry *coll = NULL
-    cdef int expected_type = -1
-    cdef int expected_type_alt = -1
-    cdef int curr_type = -1
-
-    if geometry_type == 3:  # POLYGON
-        expected_type = 2
-    elif geometry_type == 4:  # MULTIPOINT
-        expected_type = 0
-    elif geometry_type == 5:  # MULTILINESTRING
-        expected_type = 1
-        expected_type_alt = 2
-    elif geometry_type == 6:  # MULTIPOLYGON
-        expected_type = 3
-    elif geometry_type == 7:
-        pass
-    else:
-        raise ValueError(f"Invalid geometry_type: {geometry_type}.")
-
-    # Cast input arrays and define memoryviews for later usage
-    geometries = np.asarray(geometries, dtype=object)
-    if geometries.ndim != 1:
-        raise TypeError("geometries must be a one-dimensional array.")
-
-    indices = np.asarray(indices, dtype=np.intp)  # intp is what bincount takes
-    if indices.ndim != 1:
-        raise TypeError("indices must be a one-dimensional array.")
-
-    if geometries.shape[0] != indices.shape[0]:
-        raise ValueError("geometries and indices do not have equal size.")
-
-    if geometries.shape[0] == 0:
-        # return immediately if there are no geometries to return
-        return np.empty(shape=(0, ), dtype=object)
-
-    if np.any(indices[1:] < indices[:indices.shape[0] - 1]):
-        raise ValueError("The indices should be sorted.")
-
-    # get the geometry count per collection (this raises on negative indices)
-    cdef int[:] collection_size = np.bincount(indices).astype(np.int32)
-
-    # A temporary array for the geometries that will be given to CreateCollection.
-    # Its size equals max(collection_size) to accomodate the largest collection.
-    temp_geoms = np.empty(shape=(np.max(collection_size), ), dtype=np.intp)
-    cdef np.intp_t[:] temp_geoms_view = temp_geoms
-
-    # The final target array
-    cdef Py_ssize_t n_colls = collection_size.shape[0]
-    # Allow missing indices only if 'out' was given explicitly (if 'out' is not
-    # supplied by the user, we would have to come up with an output value ourselves).
-    cdef char allow_missing = out is not None
-    out = _check_out_array(out, n_colls)
-    cdef object[:] out_view = out
-
-    with get_geos_handle() as geos_handle:
-        for coll_idx in range(n_colls):
-            if collection_size[coll_idx] == 0:
-                if allow_missing:
-                    continue
-                else:
-                    raise ValueError(
-                        f"Index {coll_idx} is missing from the input indices."
-                    )
-            coll_size = 0
-
-            # fill the temporary array with geometries belonging to this collection
-            for coll_geom_idx in range(collection_size[coll_idx]):
-                if PyGEOS_GetGEOSGeometry(<PyObject *>geometries[geom_idx_1 + coll_geom_idx], &geom) == 0:
-                    _deallocate_arr(geos_handle, temp_geoms_view, coll_size)
-                    raise TypeError(
-                        "One of the arguments is of incorrect type. Please provide only Geometry objects."
-                    )
-
-                # ignore missing values
-                if geom == NULL:
-                    continue
-
-                # Check geometry subtype for non-geometrycollections
-                if geometry_type != 7:
-                    curr_type = GEOSGeomTypeId_r(geos_handle, geom)
-                    if curr_type == -1:
-                        _deallocate_arr(geos_handle, temp_geoms_view, coll_size)
-                        return  # GEOSException is raised by get_geos_handle
-                    if curr_type != expected_type and curr_type != expected_type_alt:
-                        _deallocate_arr(geos_handle, temp_geoms_view, coll_size)
-                        raise TypeError(
-                            f"One of the arguments has unexpected geometry type {curr_type}."
-                        )
-
-                # assign to the temporary geometry array
-                geom = GEOSGeom_clone_r(geos_handle, geom)
-                if geom == NULL:
-                    _deallocate_arr(geos_handle, temp_geoms_view, coll_size)
-                    return  # GEOSException is raised by get_geos_handle
-                temp_geoms_view[coll_size] = <np.intp_t>geom
-                coll_size += 1
-
-            # create the collection
-            if geometry_type != 3:  # Collection
-                coll = GEOSGeom_createCollection_r(
-                    geos_handle,
-                    geometry_type,
-                    <GEOSGeometry**> &temp_geoms_view[0],
-                    coll_size
-                )
-            elif coll_size != 0:  # Polygon, non-empty
-                coll = GEOSGeom_createPolygon_r(
-                    geos_handle,
-                    <GEOSGeometry*> temp_geoms_view[0],
-                    NULL if coll_size <= 1 else <GEOSGeometry**> &temp_geoms_view[1],
-                    coll_size - 1
-                )
-            else:  # Polygon, empty
-                coll = GEOSGeom_createEmptyPolygon_r(
-                    geos_handle
-                )
-
-            if coll == NULL:
-                return  # GEOSException is raised by get_geos_handle
-
-            out_view[coll_idx] = PyGEOS_CreateGeometry(coll, geos_handle)
-
-            geom_idx_1 += collection_size[coll_idx]
-
-    return out
-
-
-cdef _deallocate_arr(void* handle, np.intp_t[:] arr, Py_ssize_t last_geom_i):
-    """Deallocate a temporary geometry array to prevent memory leaks"""
-    cdef Py_ssize_t i = 0
-    cdef GEOSGeometry *g
-
-    for i in range(last_geom_i):
-        g = <GEOSGeometry *>arr[i]
-        if g != NULL:
-            GEOSGeom_destroy_r(handle, <GEOSGeometry *>arr[i])
-
-def _check_out_array(object out, Py_ssize_t size):
-    if out is None:
-        return np.empty(shape=(size,), dtype=object)
-    if not isinstance(out, np.ndarray):
-        raise TypeError("out array must be of numpy.ndarray type")
-    if not out.flags.writeable:
-        raise TypeError("out array must be writeable")
-    if out.dtype != object:
-        raise TypeError("out array dtype must be object")
-    if out.ndim != 1:
-        raise TypeError("out must be a one-dimensional array.")
-    if out.shape[0] < size:
-        raise ValueError(f"out array is too small ({out.shape[0]} < {size})")
-    return out
 
