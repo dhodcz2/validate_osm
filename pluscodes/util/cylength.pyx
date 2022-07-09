@@ -14,14 +14,10 @@ import geopandas as gpd
 # from libc.stdlib cimport malloc, free
 
 from .pygeos cimport (
-PyGEOS_CreateGeometry,
-PyGEOS_GetGEOSGeometry,
-import_pygeos_c_api,
+    PyGEOS_CreateGeometry,
+    PyGEOS_GetGEOSGeometry,
+    import_pygeos_c_api,
 )
-from pygeos._geos cimport (
-get_geos_handle,
-)
-
 
 from ._geos cimport (
     GEOSPreparedGeometry,
@@ -47,6 +43,7 @@ from ._geos cimport (
 )
 
 import_pygeos_c_api()
+
 cdef extern from '<util/globals.h>':
     const char* ALPHABET
     const size_t SEP_POS
@@ -100,18 +97,21 @@ def get_lengths(
         bounds: Optional[NDArray[float]] = None,
         points: Optional[GeoSeries] = None,
 ) -> NDArray[np.uint8]:
-    cdef double[:] wv, sv, nv, ev, px, py
-    cdef Py_ssize_t n, i
-    cdef np.ndarray[UINT8, ndim=1] lengths = np.ndarray((len(footprints),), dtype=np.uint8)
-    cdef unsigned char [:] lv = lengths
-    cdef GEOSGeometry *geom = NULL
-    cdef const GEOSPreparedGeometry *prepared = NULL
-    cdef Footprint footprint
-    cdef char c
-    cdef GEOSContextHandle_t h
+    cdef :
+        double[:] wv, sv, ev, nv, px, py
+        size_t n, i
+        np.ndarray[UINT8, ndim=1] lengths
+        unsigned char[:] lv
+        GEOSGeometry * geom = NULL
+        const GEOSPreparedGeometry *prepared = NULL
+        Footprint footprint
+        char c
+        GEOSContextHandle_t h
+        object [:] objects
 
-    footprints = footprints.to_crs(4326)
-    cdef object [:] objects = footprints.geometry.values.data
+    lengths = np.ndarray((len(footprints),), dtype=np.uint8)
+    lv = lengths
+    objects = footprints.geometry.values.data
 
     if bounds is not None:
         bw, bs, be, bn = bounds
@@ -132,14 +132,16 @@ def get_lengths(
         prepared = GEOSPrepare(geom)
 
         footprint = Footprint(bw[i], bs[i], be[i], bn[i], px[i], py[i], prepared)
-        lv[i] = get_length(footprint)
+        lv[i] = Footprint_length(footprint)
         GEOSPreparedGeom_destroy(prepared)
 
     return lengths
 
-cdef unsigned char get_length(const Footprint footprint) nogil:
-    cdef unsigned char length = 0
-    cdef double dw, dh
+cdef unsigned char Footprint_length(const Footprint footprint) nogil:
+    cdef :
+        unsigned char length = 0
+        double dw, dh
+
     dw = footprint.be - footprint.bw
     dh = footprint.bn - footprint.bs
 
@@ -151,7 +153,7 @@ cdef unsigned char get_length(const Footprint footprint) nogil:
         raise ValueError('footprint bounds too small')
 
     while length <= GRID_LENGTH:
-        if contained(footprint, length):
+        if Footprint_contained(footprint, length):
             break
         length += 1
     else:
@@ -159,7 +161,7 @@ cdef unsigned char get_length(const Footprint footprint) nogil:
 
     return PAIR_LENGTH + length
 
-cdef inline bint contained( const Footprint footprint, unsigned char grid_length, ) nogil:
+cdef inline bint Footprint_contained(const Footprint footprint, unsigned char grid_length, ) nogil:
     cdef double w, s, n, e
     cdef GEOSGeometry *point
     cdef bint intersects

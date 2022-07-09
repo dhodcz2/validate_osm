@@ -74,7 +74,6 @@ cdef class ShapeClaim:
 
     cdef unsigned long[:, :] longs
 
-
     def __cinit__(
             self,
             footprint: shapely.geometry.base.BaseGeometry,

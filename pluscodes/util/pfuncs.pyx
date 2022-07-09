@@ -70,23 +70,23 @@ def get_strings(
         y = np.ndarray.astype((y + MAX_LAT) * FINAL_LAT_PRECISION, np.uint64)
     return cfuncs.get_strings(x, y, lengths)
 
-def get_length(
-        fw: float,
-        fs: float,
-        fe: float,
-        fn: float,
-
-) -> int:
-    return cfuncs.get_length(fw, fs, fe, fn)
-
-def get_lengths(
-        fw: NDArray[np.float64],
-        fs: NDArray[np.float64],
-        fe: NDArray[np.float64],
-        fn: NDArray[np.float64],
-) -> NDArray[np.uint8]:
-    return cfuncs.get_lengths(fw, fs, fe, fn)
-
+# def get_length(
+#         fw: float,
+#         fs: float,
+#         fe: float,
+#         fn: float,
+#
+# ) -> int:
+#     return cfuncs.Footprint_length(fw, fs, fe, fn)
+#
+# def get_lengths(
+#         fw: NDArray[np.float64],
+#         fs: NDArray[np.float64],
+#         fe: NDArray[np.float64],
+#         fn: NDArray[np.float64],
+# ) -> NDArray[np.uint8]:
+#     return cfuncs.get_lengths(fw, fs, fe, fn)
+#
 def get_claim(
         fw: float,
         fs: float,

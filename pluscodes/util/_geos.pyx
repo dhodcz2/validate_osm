@@ -29,4 +29,3 @@ cdef class get_geos_handle:
             GEOS_finish_r(self.handle)
             free(self.last_error)
             free(self.last_warning)
-            free(self.handle)

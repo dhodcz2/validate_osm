@@ -93,18 +93,19 @@ cdef  np.ndarray get_strings(
         unsigned long[:] ly,
         unsigned char[:] lengths
 ):
-    cdef char* string = <char *> malloc((MAX_DIGITS + 1) * sizeof(char))
-    cdef unsigned long length = lx.size
-    cdef const char* alphabet = ALPHABET
-    codes = np.ndarray(shape=(length,), dtype='U%d' % (MAX_DIGITS+1))
-    cdef unsigned long x
-    cdef unsigned long y
-    cdef unsigned int i
-    cdef unsigned char c
-    cdef ssize_t strlen
+    cdef :
+        char * string
+        size_t size, i, strlen
+        unsigned long x, y
+        unsigned int c
+        const char* alphabet
 
+    string = <char *> malloc((MAX_DIGITS+1) * sizeof(char))
+    alphabet = ALPHABET
+    size = lengths.size
+    codes = np.ndarray(shape=(size,), dtype='U%d' % (MAX_DIGITS + 1))
 
-    for i in range(length):
+    for i in range(size):
         x = lx[i]
         y = ly[i]
         strlen = lengths[i]
@@ -131,9 +132,7 @@ cdef  np.ndarray get_strings(
             x //= BASE
             y //= BASE
 
-        # print(string[:strlen+1].decode('utf-8'))
         codes[i] = string[:strlen+1].decode('utf-8')
-
     free(string)
     return codes
 

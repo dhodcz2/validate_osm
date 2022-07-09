@@ -105,12 +105,9 @@ cdef inline bint contained(
     n = s + LAT_RESOLUTIONS[grid_length]
 
 
-    print('point')
     point = GEOSGeom_createPointFromXY_r(handle, w, s)
 
-    print('intersects')
     intersects = GEOSPreparedIntersects(footprint.prepared, point)
-    print('destroy r')
     GEOSGeom_destroy_r(handle, point)
     if not intersects:
         return False
