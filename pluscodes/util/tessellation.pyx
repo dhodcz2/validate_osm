@@ -1,4 +1,9 @@
+import geopandas as gpd
+
 from libc.stdlib cimport malloc, free
+# from libcpp.set cimport set
+from libcpp.pair cimport pair as pair
+from libcpp.map cimport map as map
 import pygeos.geometry
 
 from cython cimport view
@@ -13,6 +18,9 @@ import numpy as np
 cimport numpy as np
 np.import_array()
 cimport util.cfuncs as cfuncs
+
+cdef extern from '<utility>' namespace 'std' nogil:
+    pair[T,U] make_pair[T,U](T&,U&)
 
 cdef extern from '<util/globals.h>':
     const char* ALPHABET
@@ -127,6 +135,7 @@ cdef Tessellation decompose(
 
     # TODO: If only we had a stable C API for PyGEOS, we could iterate and instantiate ephemeral Point objects
     #   instead of needing to create a numpy array of PyGEOS objects.
+    #   This is the only spot I am using a python function; otherwise I could use nogil
     points = pygeos.creation.points(
         np.asarray(coords[:, 0], dtype=np.float64),
         np.asarray(coords[:, 1], dtype=np.float64),
@@ -174,13 +183,14 @@ cdef Tessellation decompose(
                 longs[k + 1] = ls[j]
                 k += 2
 
-    assert k == n_tiles * 2
-
     return Tessellation(
         n_tiles=n_tiles,
         code_length=code_length,
         longs=longs,
     )
+
+ctypedef pair[unsigned long, unsigned long] plong
+ctypedef map[plong, size_t] map_type
 
 cdef class Tessellations:
     cdef :
@@ -260,12 +270,30 @@ cdef class Tessellations:
                 self._iloc[k] = i
                 k += 1
 
-        assert k == self._n_tiles
-
         self._strings = cfuncs.get_strings(self._longs[:, 0], self._longs[:, 1], code_lengths)
         self._bounds = cfuncs.get_bounds(self._longs[:, 0], self._longs[:, 1], code_lengths)
 
-        # TODO: test for duplicate tiles
+        # TODO: Iteratively hash the pairs of longs; if there are duplicates, raise an exception
+
+        # cdef :
+        #     map_type exists
+        #     plong key
+        # TODO: Perhaps raise this issue for Cython; using pairs as keys seems to fail
+        # for i in range(self._n_gdf):
+        #     for j in range(self._left_bounds[i], self._left_bounds[i] + self._repeats[i]):
+        #         key = plong(self._longs[j, 0,], self._longs[j, 1])
+        #         if key in exists:
+        #             raise ValueError(f'shared tile discovered between {i} and {exists[key]}')
+        #         exists[key] = j
+
+        # This currently sucks
+        claimed = {}
+        for i in range(self._n_gdf):
+            strings: np.array = self._strings[self._left_bounds[i]:self._left_bounds[i] + self._repeats[i]]
+            for string in strings:
+                if string in claimed:
+                    raise ValueError(f'shared tile discovered between {i} and {claimed[string]}')
+            claimed.update({string: i for string in strings})
 
 
 
@@ -275,22 +303,32 @@ cdef class Tessellations:
         free(self._decompositions)
 
 
-    def geoseries(self) -> GeoSeries:
+    def geoseries(
+            self,
+            *args,
+            dissolve=False,
+    ) -> GeoSeries:
         spaces = np.asarray(self._spaces).repeat(np.asarray(self._repeats))
         index = pd.MultiIndex.from_arrays((
             np.asarray(self._iloc), np.asarray(spaces), self._strings
         ), names=('iloc', 'space', 'string'))
         data = pygeos.creation.box(self._bounds[:, 0], self._bounds[:, 1], self._bounds[:, 2], self._bounds[:, 3])
-        return GeoSeries(data=data, index=index, crs=4326)
+        # gs = GeoSeries(data, index=index, crs=4326)
+        if dissolve:
+            gdf = gpd.GeoDataFrame(data=data, index=index, crs=4326)
+            gdf = gdf.dissolve('space')
+        else:
+            return GeoSeries(data, index=index, crs=4326)
 
-    def tiles(self) -> dict[str, str]:
+
+    def tiles_spaces(self) -> dict[str, str]:
         return {
             self._strings[j]: self._spaces[i]
             for i in range(self._n_gdf)
             for j in range(self._left_bounds[i], self._left_bounds[i] + self._repeats[i])
         }
 
-    def spaces(self) -> dict[str, set[str]]:
+    def spaces_sets(self) -> dict[str, set[str]]:
         return {
             self._spaces[i]: {
                 self._strings[j]
@@ -298,3 +336,5 @@ cdef class Tessellations:
             }
             for i in range(self._n_gdf)
         }
+
+# TODO: How do we detect duplicates?
