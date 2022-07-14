@@ -1,6 +1,7 @@
 import itertools
 from typing import Tuple, Iterator
 
+import numpy as np
 from geopandas import GeoDataFrame
 from pandas import IndexSlice as idx
 from pandas import Series
@@ -61,53 +62,53 @@ def _iloc_left(left: Series, right: Series) -> Series:
     :param left: The perspective of the join
     :param right: The dataset that is being matched to the left;
         iloc will match left iloc, while space and tile will remain unchanged
-    :return: The index [iloc, space] of the new DataFrame that will be appended to left
+    :return: The index [iloc, space] of the new right DataFrame that matches the left DataFrame on iloc
     """
+    dtype = left.index.get_level_values('space').dtype
     spaces = _algorithm(left, right)
+    repeat = list(map(len, spaces.values()))
+    count = sum(repeat)
+    l_spaces = np.fromiter(spaces.keys(), dtype=dtype, count=len(spaces))
+    # l_spaces = l_spaces.repeat(repeat)
+    r_spaces = np.fromiter(itertools.chain.from_iterable(spaces.values()), dtype=dtype, count=count)
 
-    l_spaces = spaces.keys()
+    iloc = left.loc[idx[:, l_spaces, :], :].index.get_level_values('iloc')
+    iloc = iloc.repeat(repeat)
 
-    data = left[idx[:, l_spaces, :], :].index.get_level_values('iloc')
-    repeat = [
-        len(r_spaces)
-        for r_spaces in spaces.values()
-    ]
-    data = data.repeat(repeat)
+    return Series(iloc, index=r_spaces)
 
-    r_spaces = itertools.chain.from_iterable(spaces.values())
-    index = right.loc[ idx[:, r_spaces, :], : ].index
-    index = index.drop(level='tile')
 
-    result = Series(
-        data=data,
-        index=index,
-        name='iloc_left',
-    )
-    return result
+    # l_spaces = spaces.keys()
+    #
+    # data = left[idx[:, l_spaces, :], :].index.get_level_values('iloc')
+    # repeat = [
+    #     len(r_spaces)
+    #     for r_spaces in spaces.values()
+    # ]
+    # data = data.repeat(repeat)
+    #
+    # r_spaces = itertools.chain.from_iterable(spaces.values())
+    # index = right.loc[ idx[:, r_spaces, :], :].index
+    # index = index.drop(level='tile')
+    #
+    # result = Series(
+    #     data=data,
+    #     index=index,
+    #     name='iloc_left',
+    #     dtype='uint64',
+    # )
+    # return result
 
-def tjoin(
-        left: GeoDataFrame,
-        right: GeoDataFrame,
-        *args,
-        append_index: bool = False,
-) -> GeoDataFrame:
+
+def match( left: Decompositions, right: Decompositions, ) -> GeoDataFrame:
     """
 
     :param left:
     :param right:
     :return: a subset of right which matches left on iloc
     """
-    # TODO: This one matches without any residual indices; it leaves no evidence
-    left = Decompositions(left)
-    right = Decompositions(right)
-    iloc_left = _iloc_left(left.tiles(geo=False), right.tiles(geo=False))
-    spaces = right.spaces(geo=False)
-    spaces = spaces.merge(iloc_left, left_index=True, right_index=True)
-    result = left.spaces(geo=False).merge(
-        spaces,
-        left_on='iloc',
-        right_on='iloc_left',
-        how='inner',
-    )
-    return result
-
+    iloc_left = _iloc_left(left.tiles(), right.tiles())
+    spaces = right.spaces().droplevel('iloc')
+    spaces = spaces.merge(iloc_left, left_on='space', right_index=True, how='right')
+    spaces = spaces.set_index('iloc_left', append=True)
+    return spaces
