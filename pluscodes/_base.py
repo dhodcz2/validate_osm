@@ -18,7 +18,11 @@ import functools
 import geopandas as gpd
 from geopandas import GeoDataFrame
 from pandas import IndexSlice as idx
-import pluscodes.util as util
+# import pluscodes.util as util
+try:
+    import pluscodes.util as util
+except ImportError:
+    import util
 
 import numpy as np
 from geopandas import GeoSeries
@@ -26,6 +30,8 @@ from geopandas import GeoSeries
 posixpath.sep = sep  # somehow, the geographic dependencies are deleting posixpath.sep
 
 __all__ = ['PlusCodes']
+
+# TODO: lookup
 
 
 class DescriptorLoc:
@@ -38,22 +44,22 @@ class DescriptorLoc:
         if np.issubdtype(item.dtype, np.integer):
             footprints = pc.footprints.loc[item]
             heads = pc.heads.loc[idx[item, :]]
-            claims = pc.claims.loc[idx[item, :, :]]
+            tiles = pc.tiles.loc[idx[item, :, :]]
 
         elif np.issubdtype(item.dtype, np.string_):
             heads = pc.heads.loc[idx[:, item]]
             footprints = heads.index.get_level_values(0)
-            claims = pc.claims.loc[idx[footprints, :, :]]
+            tiles = pc.tiles.loc[idx[footprints, :, :]]
             footprints = pc.footprints.loc[idx[footprints]]
 
         elif np.issubdtype(item.dtype, np.bool_):
             heads = pc.heads.loc[item]
             footprints = pc.footprints.loc[item]
-            claims = pc.claims.loc[idx[footprints.index, :, :]]
+            tiles = pc.tiles.loc[idx[footprints.index, :, :]]
 
         else:
             raise TypeError(f'{item.dtype} is not supported')
-        return PlusCodes(heads, footprints, claims)
+        return PlusCodes(heads, footprints, tiles)
 
 
 #
@@ -66,8 +72,8 @@ class DescriptorIloc:
         pc = self.pluscodes
         heads = pc.heads.iloc[item]
         footprints = pc.footprints.iloc[item]
-        claims = pc.claims.loc[idx[footprints.index, :, :]]
-        return PlusCodes(heads, footprints, claims)
+        tiles = pc.tiles.loc[idx[footprints.index, :, :]]
+        return PlusCodes(heads, footprints, tiles)
 
 
 class DescriptorCx:
@@ -79,14 +85,14 @@ class DescriptorCx:
         pc = self.pluscodes
         footprints = pc.footprints.cx[item]
         # heads = pc.heads.loc[idx[footprints.index, :]]
-        claims = pc.claims.loc[idx[footprints.index, :, :]]
+        tiles = pc.tiles.loc[idx[footprints.index, :, :]]
         return PlusCodes(
             footprints=footprints,
             # heads=heads,
             heads=None,
-            claims=claims
+            tiles=tiles
         )
-        # return PlusCodes(heads, footprints, claims)
+        # return PlusCodes(heads, footprints, tiles)
 
     def latlon(self, miny, minx, maxy, maxx) -> 'PlusCodes':
         item = (
@@ -97,14 +103,15 @@ class DescriptorCx:
 
 
 class PlusCodes:
+    # TODO: tiles and z
     loc = DescriptorLoc()
     iloc = DescriptorIloc()
     cx = DescriptorCx()
 
-    def __init__(self, footprints: GeoDataFrame, heads: GeoDataFrame, claims: GeoDataFrame):
+    def __init__(self, footprints: GeoDataFrame, heads: GeoDataFrame, tiles: GeoDataFrame):
         self.footprints = footprints
         self.heads = heads
-        self.claims = claims
+        self.tiles = tiles
 
     def __len__(self):
         return len(self.footprints)
@@ -130,18 +137,10 @@ class PlusCodes:
         return footprints
 
     @classmethod
-    def __lengths(cls, gdf: GeoDataFrame) -> np.ndarray:
-        return util.get_lengths(*gdf.geometry.bounds.values.T)
-
-    @classmethod
-    def __claims(cls, footprints: GeoDataFrame, lengths) -> GeoDataFrame:
-        return util.generate_claims(footprints, lengths)
-
-    @classmethod
     def __heads(cls, footprints: GeoDataFrame, lengths) -> GeoDataFrame:
         # TODO: Get centroids without creating the shapely objects
-        points = footprints.representative_point()
-        # centroid = footprints.geometry.centroid
+        # points = footprints.representative_point()
+        points = footprints.geometry.centroid
         x = points.x.values
         y = points.y.values
         bounds = util.get_bounds(x, y, lengths)
@@ -170,22 +169,23 @@ class PlusCodes:
                 gdf = gpd.read_file(gdf)
 
         footprints = cls.__footprints(gdf)
-        lengths = cls.__lengths(footprints)
-        claims = cls.__claims(footprints, lengths)
+        bounds = footprints._bounds.T.values
+        lengths = util.get_lengths(footprints, bounds)
+        tiles = util.get_geoseries_tiles(footprints, lengths)
         heads = cls.__heads(footprints, lengths)
-        return cls(footprints=footprints, heads=heads, claims=claims)
+        return cls(footprints=footprints, heads=heads, tiles=tiles)
 
     @classmethod
     def from_file(cls, filepath: str) -> 'PlusCodes':
         with zipfile.ZipFile(filepath) as zf:
             tempdir = tempfile.gettempdir()
             footprints = zf.extract('footprints.feather', tempdir)
-            claims = zf.extract('claims.feather', tempdir)
+            tiles = zf.extract('tiles.feather', tempdir)
             heads = zf.extract('heads.feather', tempdir)
         footprints = gpd.read_feather(footprints)
-        claims = gpd.read_feather(claims)
+        tiles = gpd.read_feather(tiles)
         heads = gpd.read_feather(heads)
-        return cls(footprints=footprints, heads=heads, claims=claims)
+        return cls(footprints=footprints, heads=heads, tiles=tiles)
 
     def to_file(self, path: Optional[str] = None) -> str:
         if path is None:
@@ -193,34 +193,34 @@ class PlusCodes:
             path = os.path.join(os.getcwd(), 'pluscodes.zip')
         footprints = os.path.join(tempdir, 'footprints.feather')
         heads = os.path.join(tempdir, 'heads.feather')
-        claims = os.path.join(tempdir, 'claims.feather')
+        tiles = os.path.join(tempdir, 'tiles.feather')
         self.footprints.to_feather(footprints)
         self.heads.to_feather(heads)
-        self.claims.to_feather(claims)
+        self.tiles.to_feather(tiles)
         with zipfile.ZipFile(path, 'w') as zip:
             zip.write(footprints)
             zip.write(heads)
-            zip.write(claims)
+            zip.write(tiles)
         return path
 
     def xs(self, key: Union[int, str], level) -> 'PlusCodes':
         if level == 'footprint':
             footprints = self.footprints.xs(key)
             heads = self.heads.loc[idx[footprints.index, :]]
-            claims = self.claims.loc[idx[footprints.index, :, :]]
+            tiles = self.tiles.loc[idx[footprints.index, :, :]]
         elif level == 'head':
             heads = self.heads.xs(key, level='head')
             footprint = heads.index.get_level_values(0)
-            claims = self.claims.loc[idx[footprint, :, :]]
+            tiles = self.tiles.loc[idx[footprint, :, :]]
             footprints = self.footprints.loc[idx[footprint]]
-        elif level == 'claim':
-            claims = self.claims.xs(key, level='claim')
-            footprint = claims.index.get_level_values(0)
+        elif level == 'tile':
+            tiles = self.tiles.xs(key, level='tile')
+            footprint = tiles.index.get_level_values(0)
             heads = self.heads.loc[idx[footprint.index, :]]
             footprints = self.footprints.loc[idx[footprint]]
         else:
             raise ValueError(f'{level} is not supported')
-        return PlusCodes(footprints, heads, claims)
+        return PlusCodes(footprints, heads, tiles)
 
     def explore(self, **kwargs) -> folium.Map:
         centroid = self.footprints.geometry.iloc[0].centroid
@@ -233,13 +233,13 @@ class PlusCodes:
             'head': heads.index.get_level_values('head'),
         }, geometry=heads.geometry, crs=4326, index=heads.index)
 
-        claims: GeoDataFrame = self.claims
-        claims: GeoDataFrame = GeoDataFrame({
-            'claim': claims.index.get_level_values('claim'),
-        }, geometry=claims.geometry, crs=4326, index=claims.index)
+        tiles: GeoDataFrame = self.tiles
+        tiles: GeoDataFrame = GeoDataFrame({
+            'tile': tiles.index.get_level_values('tile'),
+        }, geometry=tiles.geometry, crs=4326, index=tiles.index)
 
         head = set(heads.index.get_level_values('head'))
-        claims = claims[~claims.index.get_level_values('claim').isin(head)]
+        tiles = tiles[~tiles.index.get_level_values('tile').isin(head)]
 
         m = folium.Map(
             location=(centroid.y, centroid.x),
@@ -259,12 +259,14 @@ class PlusCodes:
             color='blue',
             **kwargs,
         )
-        claims.explore(
+        tiles.explore(
             m=m,
             color='red',
             **kwargs,
         )
         return m
+
+
 
 
 if __name__ == '__main__':
@@ -278,7 +280,7 @@ if __name__ == '__main__':
     #      ]
     # pc = PlusCodes.from_gdf(ne)
     # pc.explore()
-    import util.claim
+    import util.tile
     import geopandas as gpd
 
     gdf = gpd.read_feather('/home/arstneio/Downloads/ne.feather')

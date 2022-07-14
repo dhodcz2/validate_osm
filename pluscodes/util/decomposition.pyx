@@ -1,4 +1,7 @@
 import geopandas as gpd
+from geopandas import GeoDataFrame, GeoSeries
+from pandas import Series, DataFrame
+
 
 from libc.stdlib cimport malloc, free
 # from libcpp.set cimport set
@@ -69,12 +72,12 @@ for n in range(6):
     YSTEPS[n] = pow(GRID_ROWS, GRID_LENGTH - n)
 
 
-cdef struct Tessellation:
+cdef struct Decomposition:
     size_t n_tiles
     unsigned char code_length
     unsigned long* longs
 
-cdef Tessellation decompose(
+cdef Decomposition decompose(
         geometry: pygeos.geometry.Geometry,
         unsigned long w,
         unsigned long s,
@@ -161,7 +164,7 @@ cdef Tessellation decompose(
         #   our approach scales well with building size, however including "buildings" somehow smaller than a bus stop
         #   will generate many, many tiles for a very small area, stressing visualization
         if code_length >= 11:
-            return Tessellation(n_tiles=0, code_length=code_length, longs=NULL)
+            return Decomposition(n_tiles=0, code_length=code_length, longs=NULL)
 
         if grid_length == GRID_LENGTH:
             raise ValueError('Unable to decompose geometry into sufficiently small tiles')
@@ -183,7 +186,7 @@ cdef Tessellation decompose(
                 longs[k + 1] = ls[j]
                 k += 2
 
-    return Tessellation(
+    return Decomposition(
         n_tiles=n_tiles,
         code_length=code_length,
         longs=longs,
@@ -192,11 +195,12 @@ cdef Tessellation decompose(
 ctypedef pair[unsigned long, unsigned long] plong
 ctypedef map[plong, size_t] map_type
 
-cdef class Tessellations:
+cdef class Decompositions:
     cdef :
-        Tessellation * _decompositions
+        Decomposition * _decompositions
 
-        size_t _n_tiles, _n_gdf
+        readonly size_t _n_tiles
+        size_t _n_gdf
         np.ndarray _strings
 
         double[:, :] _bounds
@@ -205,17 +209,22 @@ cdef class Tessellations:
         unsigned long[:] _iloc, _spaces, _left_bounds,
         unsigned int[:] _repeats
 
+    _gdf: GeoDataFrame
+
+    def __init__(self, gdf):
+        ...
+
     def __cinit__(self, gdf: Union[GeoDataFrame, GeoSeries]):
         cdef :
-            Tessellation decomposition
+            Decomposition decomposition
             unsigned long[:] left_bounds, iloc
             unsigned char[:] code_lengths
             unsigned long[:] lw, ls, le, ln
             size_t i, j, k
 
-
+        self._gdf = gdf
         self._n_gdf = len(gdf)
-        self._decompositions = <Tessellation *>malloc(self._n_gdf * sizeof(Tessellation))
+        self._decompositions = <Decomposition *>malloc(self._n_gdf * sizeof(Decomposition))
 
         fw, fs, fe, fn = gdf.bounds.values.T
         lw = np.ndarray.astype((
@@ -275,18 +284,8 @@ cdef class Tessellations:
 
         # TODO: Iteratively hash the pairs of longs; if there are duplicates, raise an exception
 
-        # cdef :
-        #     map_type exists
-        #     plong key
-        # TODO: Perhaps raise this issue for Cython; using pairs as keys seems to fail
-        # for i in range(self._n_gdf):
-        #     for j in range(self._left_bounds[i], self._left_bounds[i] + self._repeats[i]):
-        #         key = plong(self._longs[j, 0,], self._longs[j, 1])
-        #         if key in exists:
-        #             raise ValueError(f'shared tile discovered between {i} and {exists[key]}')
-        #         exists[key] = j
-
-        # This currently sucks
+        # TODO: This currently sucks for runtime because it uses Python objects, but I was not able to
+        #   leverage the stdlib map with pairs as keys.
         claimed = {}
         for i in range(self._n_gdf):
             strings: np.array = self._strings[self._left_bounds[i]:self._left_bounds[i] + self._repeats[i]]
@@ -303,32 +302,53 @@ cdef class Tessellations:
         free(self._decompositions)
 
 
-    def geoseries(
-            self,
-            *args,
-            dissolve=False,
-    ) -> GeoSeries:
-        spaces = np.asarray(self._spaces).repeat(np.asarray(self._repeats))
-        index = pd.MultiIndex.from_arrays((
-            np.asarray(self._iloc), np.asarray(spaces), self._strings
-        ), names=('iloc', 'space', 'string'))
-        data = pygeos.creation.box(self._bounds[:, 0], self._bounds[:, 1], self._bounds[:, 2], self._bounds[:, 3])
-        # gs = GeoSeries(data, index=index, crs=4326)
-        if dissolve:
-            gdf = gpd.GeoDataFrame(data=data, index=index, crs=4326)
-            gdf = gdf.dissolve('space')
+    def spaces(self, geo: bool = False) -> GeoDataFrame | DataFrame:
+        # space and iloc as index
+        if geo:
+            tiles: GeoSeries = self.tiles(geo=True).drop(level='tile')
+            spaces: GeoDataFrame = GeoDataFrame(tiles)
+            spaces = spaces.dissolve('space', sort=False)
+            return spaces
         else:
-            return GeoSeries(data, index=index, crs=4326)
+            index = pd.MultiIndex.from_arrays((
+                np.asarray(self._iloc), np.array(self._spaces),
+            ), names=('iloc', 'space'))
+            df = DataFrame(index=index)
+            return df
 
 
-    def tiles_spaces(self) -> dict[str, str]:
+    def tiles(self, geo: bool = False) -> GeoSeries | Series:
+        # space, iloc, and string as index
+        repeats = np.asarray(self._repeats)
+        iloc = np.asarray(self._iloc)
+        spaces = np.asarray(self._spaces).repeat(repeats)
+        strings = np.asarray(self._strings)
+        if geo:
+            index = pd.MultiIndex.from_arrays((
+                iloc, spaces, strings,
+            ), names=('iloc', 'space', 'tile'))
+            geometry = pygeos.creation.box(
+                self._bounds[:, 0], self._bounds[:, 1], self._bounds[:, 2], self._bounds[:, 3]
+            )
+            gs = GeoSeries(geometry, index=index, crs=4326)
+            return gs
+        else:
+            index = pd.MultiIndex.from_arrays((
+                iloc, spaces
+            ), names=('iloc', 'space'))
+            s = Series(strings, index=index)
+            return s
+
+
+
+    def space(self) -> dict[str, str]:
         return {
             self._strings[j]: self._spaces[i]
             for i in range(self._n_gdf)
             for j in range(self._left_bounds[i], self._left_bounds[i] + self._repeats[i])
         }
 
-    def spaces_sets(self) -> dict[str, set[str]]:
+    def set(self) -> dict[str, set[str]]:
         return {
             self._spaces[i]: {
                 self._strings[j]
@@ -336,5 +356,3 @@ cdef class Tessellations:
             }
             for i in range(self._n_gdf)
         }
-
-# TODO: How do we detect duplicates?
