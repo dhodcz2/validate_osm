@@ -294,8 +294,6 @@ cdef class Decompositions:
                     raise ValueError(f'shared tile discovered between {i} and {claimed[string]}')
             claimed.update({string: i for string in strings})
 
-
-
     def __dealloc__(self):
         for i in range(self._n_gdf):
             free(self._decompositions[i].longs)
@@ -303,56 +301,55 @@ cdef class Decompositions:
 
 
     def spaces(self, geo: bool = False) -> GeoDataFrame | DataFrame:
+        # TODO: Floating precision error is causing small discontinuities in the spaces.
         # space and iloc as index
+        valid = np.asarray(self._repeats).astype(np.bool_)
+        iloc = np.arange(self._n_gdf, dtype=np.uint64)[valid]
+        space = np.asarray(self._spaces)[valid]
+        gdf: GeoDataFrame = self._gdf.iloc[iloc].copy()
+        index = pd.MultiIndex.from_arrays((iloc, space), names=('iloc', 'space'))
+        gdf.index = index
+
         if geo:
-            tiles: GeoSeries = self.tiles(geo=True).drop(level='tile')
-            spaces: GeoDataFrame = GeoDataFrame(tiles)
-            spaces = spaces.dissolve('space', sort=False)
-            return spaces
-        else:
-            index = pd.MultiIndex.from_arrays((
-                np.asarray(self._iloc), np.array(self._spaces),
-            ), names=('iloc', 'space'))
-            df = DataFrame(index=index)
-            return df
+            geometry = GeoDataFrame(geometry=self.tiles(geo=True))
+            # groupby preserves the order of rows within each group
+            geometry = geometry.dissolve('space', sort=False, as_index=False).geometry.values.data
+            gdf['geometry'] = geometry
+
+        return gdf
 
 
-    def tiles(self, geo: bool = False) -> GeoSeries | Series:
+    def tiles(self, geo: bool = False) -> GeoSeries:
         # space, iloc, and string as index
         repeats = np.asarray(self._repeats)
         iloc = np.asarray(self._iloc)
         spaces = np.asarray(self._spaces).repeat(repeats)
         strings = np.asarray(self._strings)
+        index = pd.MultiIndex.from_arrays((
+            iloc, spaces, strings,
+        ), names=('iloc', 'space', 'tile'))
+
         if geo:
-            index = pd.MultiIndex.from_arrays((
-                iloc, spaces, strings,
-            ), names=('iloc', 'space', 'tile'))
             geometry = pygeos.creation.box(
                 self._bounds[:, 0], self._bounds[:, 1], self._bounds[:, 2], self._bounds[:, 3]
             )
-            gs = GeoSeries(geometry, index=index, crs=4326)
-            return gs
+            return GeoSeries(geometry, index=index, crs=4326)
         else:
-            index = pd.MultiIndex.from_arrays((
-                iloc, spaces
-            ), names=('iloc', 'space'))
-            s = Series(strings, index=index)
-            return s
+            return GeoSeries(index=index, crs=4326)
 
-
-
-    def space(self) -> dict[str, str]:
-        return {
-            self._strings[j]: self._spaces[i]
-            for i in range(self._n_gdf)
-            for j in range(self._left_bounds[i], self._left_bounds[i] + self._repeats[i])
-        }
-
-    def set(self) -> dict[str, set[str]]:
-        return {
-            self._spaces[i]: {
-                self._strings[j]
-                for j in range(self._left_bounds[i], self._left_bounds[i] + self._repeats[i])
-            }
-            for i in range(self._n_gdf)
-        }
+    #
+    # def space(self) -> dict[str, str]:
+    #     return {
+    #         self._strings[j]: self._spaces[i]
+    #         for i in range(self._n_gdf)
+    #         for j in range(self._left_bounds[i], self._left_bounds[i] + self._repeats[i])
+    #     }
+    #
+    # def set(self) -> dict[str, set[str]]:
+    #     return {
+    #         self._spaces[i]: {
+    #             self._strings[j]
+    #             for j in range(self._left_bounds[i], self._left_bounds[i] + self._repeats[i])
+    #         }
+    #         for i in range(self._n_gdf)
+    #     }
