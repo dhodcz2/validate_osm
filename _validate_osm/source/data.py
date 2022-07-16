@@ -229,7 +229,7 @@ class DescriptorData:
             rows = max(len(obj) for obj in indie.values())
             data = GeoDataFrame({
                 name: (
-                    series.repeat(rows).reset_index(drop=True)
+                    series._repeats(rows).reset_index(drop=True)
                     if len(series) == 1
                     else series
                 )

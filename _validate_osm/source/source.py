@@ -136,11 +136,5 @@ class Source(abc.ABC, metaclass=SourceMeta):
             for centroid in self.data['centroid'].to_crs(4326)
         ), index=self.data.index, dtype='string')
 
-        # loc = self.data['centroid'].notna()
-        # return GeoSeries((
-        #     shapely.geometry.Point(centroid.y, centroid.x)
-        #     for centroid in self.data.loc[loc, 'centroid'].to_crs(4326)
-        # ), index=self.data.loc[loc].index)
-
     def __hash__(self):
         return hash(self.name)

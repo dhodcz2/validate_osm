@@ -3,15 +3,12 @@ import abc
 #   and there should be a minimum thickness of 2 tiles at the centroid
 # TODO: Multipolygons are currently generating tiles between polygons. Is this appropriate?
 import itertools
-import posixpath
 
 import pandas as pd
 from pandas import DataFrame
 
-sep = posixpath.sep
 
 from typing import Union, Iterable
-import folium
 import geopandas as gpd
 from geopandas import GeoDataFrame
 from pandas import IndexSlice as idx
@@ -20,7 +17,6 @@ from pluscodes.util import Decompositions
 import numpy as np
 from geopandas import GeoSeries
 
-posixpath.sep = sep  # somehow, the geographic dependencies are deleting posixpath.sep
 from pluscodes import tmatch
 
 __all__ = ['Tessellation']
@@ -142,7 +138,11 @@ class Tessellation:
         )
         return f'{self.__class__.__qualname__} {self.name} [{bounds}]'
 
-    def explore_spaces(self, *args, **kwargs) -> folium.Map:
+    def explore_spaces(self, *args, **kwargs) -> 'folium.Map':
+        import posixpath
+        sep = posixpath.sep
+        import folium
+        posixpath.sep = sep  # somehow, the geographic dependencies are deleting posixpath.sep
         if not isinstance(self.tiles, GeoSeries):
             raise TypeError('Tiles must be a GeoSeries')
         if not isinstance(self.spaces, GeoDataFrame):
@@ -172,7 +172,11 @@ class Tessellation:
         )
         return m
 
-    def explore_tiles(self, *args, **kwargs) -> folium.Map:
+    def explore_tiles(self, *args, **kwargs) -> 'folium.Map':
+        import posixpath
+        sep = posixpath.sep
+        import folium
+        posixpath.sep = sep  # somehow, the geographic dependencies are deleting posixpath.sep
         if not isinstance(self.tiles, GeoSeries):
             raise TypeError('Tiles must be a GeoSeries')
         if not isinstance(self.spaces, GeoDataFrame):

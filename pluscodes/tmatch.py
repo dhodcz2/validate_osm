@@ -1,3 +1,4 @@
+import functools
 import itertools
 from typing import Tuple, Iterator
 
@@ -6,8 +7,7 @@ from geopandas import GeoDataFrame
 from pandas import IndexSlice as idx
 from pandas import Series
 
-from util import Decompositions
-
+from pluscodes.util import Decompositions
 
 def _algorithm(left: Series, right: Series) -> dict[str, set[str]]:
     left_tiles = left.index.get_level_values('tile')
@@ -35,8 +35,8 @@ def _algorithm(left: Series, right: Series) -> dict[str, set[str]]:
         for l_space, l_loc in left_groups.items():
             l_tiles = l_loc.get_level_values('tile')
             l_tiles = l_tiles.intersection(right_tiles)
-            r_spaces = right.loc[idx[:, :, l_tiles], :].index.get_level_values('space')
-            r = right.loc[idx[:, r_spaces, :], :]
+            r_spaces = right.loc[idx[:, :, l_tiles]].index.get_level_values('space')
+            r = right.loc[idx[:, r_spaces, :]]
             r_groups = r.groupby('space').groups
 
             def r_spaces():
@@ -57,58 +57,54 @@ def _algorithm(left: Series, right: Series) -> dict[str, set[str]]:
     }
 
 
-def _iloc_left(left: Series, right: Series) -> Series:
+def _match_spaces(left_tiles: Series, right_tiles: Series) -> Series:
     """
-    :param left: The perspective of the join
-    :param right: The dataset that is being matched to the left;
+    :param left_tiles: The perspective of the join
+    :param right_tiles: The dataset that is being matched to the left;
         iloc will match left iloc, while space and tile will remain unchanged
     :return: The index [iloc, space] of the new right DataFrame that matches the left DataFrame on iloc
     """
-    dtype = left.index.get_level_values('space').dtype
-    spaces = _algorithm(left, right)
+    dtype = left_tiles.index.get_level_values('space').dtype
+    spaces = _algorithm(left_tiles, right_tiles)
     repeat = list(map(len, spaces.values()))
     count = sum(repeat)
     l_spaces = np.fromiter(spaces.keys(), dtype=dtype, count=len(spaces))
-    # l_spaces = l_spaces.repeat(repeat)
     r_spaces = np.fromiter(itertools.chain.from_iterable(spaces.values()), dtype=dtype, count=count)
 
-    iloc = left.loc[idx[:, l_spaces, :], :].index.get_level_values('iloc')
+    iloc = left_tiles.loc[idx[:, l_spaces, :]].index.get_level_values('iloc').unique()
     iloc = iloc.repeat(repeat)
-
     return Series(iloc, index=r_spaces)
 
-
-    # l_spaces = spaces.keys()
-    #
-    # data = left[idx[:, l_spaces, :], :].index.get_level_values('iloc')
-    # repeat = [
-    #     len(r_spaces)
-    #     for r_spaces in spaces.values()
-    # ]
-    # data = data.repeat(repeat)
-    #
-    # r_spaces = itertools.chain.from_iterable(spaces.values())
-    # index = right.loc[ idx[:, r_spaces, :], :].index
-    # index = index.drop(level='tile')
-    #
-    # result = Series(
-    #     data=data,
-    #     index=index,
-    #     name='iloc_left',
-    #     dtype='uint64',
-    # )
-    # return result
-
-
-def match( left: Decompositions, right: Decompositions, ) -> GeoDataFrame:
-    """
-
-    :param left:
-    :param right:
-    :return: a subset of right which matches left on iloc
-    """
-    iloc_left = _iloc_left(left.tiles(), right.tiles())
-    spaces = right.spaces().droplevel('iloc')
-    spaces = spaces.merge(iloc_left, left_on='space', right_index=True, how='right')
-    spaces = spaces.set_index('iloc_left', append=True)
+def _tmatch(
+        left: Decompositions,
+        right: Decompositions,
+) -> GeoDataFrame:
+    iloc_left = tmatch._match_spaces(left.tiles, right.tiles)
+    spaces = right.spaces.droplevel('iloc')
+    spaces = spaces.merge(iloc_left, left_on='space', right_index=True, how='right', suffixes=None)
+    spaces = spaces.set_index('iloc', append=True)
     return spaces
+
+def tmatch(
+        left: GeoDataFrame,
+        right: GeoDataFrame,
+) -> GeoDataFrame:
+    left = Decompositions(left)
+    right = Decompositions(right)
+    return _tmatch(left, right)
+
+
+
+# def match( left: Decompositions, right: Decompositions, ) -> GeoDataFrame:
+#     """
+#
+#     :param left:
+#     :param right:
+#     :return: a subset of right which matches left on iloc
+#     """
+#     iloc_left = _match_spaces(left.tiles(), right.tiles())
+#     spaces = right.spaces().droplevel('iloc')
+#     spaces = spaces.merge(iloc_left, left_on='space', right_index=True, how='right')
+#     spaces = spaces.set_index('iloc', append=True)
+#     return spaces
+#

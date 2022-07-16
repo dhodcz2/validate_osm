@@ -89,7 +89,7 @@ def plot_mismatch(mismatch: GeoDataFrame, haystack: GeoDataFrame, identifiers: l
     fig, ax = plt.subplots()
     # fig: plt.figure.F, ax = plt.subplots()
 
-    surroundings.geometry.exterior.plot(ax=ax, color='black')
+    surroundings.gdf.exterior.plot(ax=ax, color='black')
     mismatch.geometry.exterior.plot(ax=ax, color='blue')
     mismatch.geometry.centroid.plot(ax=ax, color='blue')
     mismatch.geometry_hay.exterior.plot(ax=ax, color='red')
@@ -127,8 +127,8 @@ def plot_mismatch(mismatch: GeoDataFrame, needles: GeoDataFrame, haystack: GeoDa
     needle_surroundings = gpd.sjoin(needles, buff)
     haystack_surroundings = gpd.sjoin(haystack, buff)
 
-    haystack_surroundings.geometry.exterior.plot(ax=ax_hay, color='black')
-    needle_surroundings.geometry.exterior.plot(ax=ax_needle, color='black')
+    haystack_surroundings.gdf.exterior.plot(ax=ax_hay, color='black')
+    needle_surroundings.gdf.exterior.plot(ax=ax_needle, color='black')
 
     mismatch.geometry.exterior.plot(ax=ax_needle, color='blue')
     mismatch.geometry_hay.exterior.plot(ax=ax_hay, color='red')
@@ -311,7 +311,7 @@ def plot_discrepancy(gdf: GeoDataFrame, match: GeoDataFrame, r_suffix: str = '_r
     for point, height in zip(needle_surroundings['centroid'].to_crs(4326), needle_surroundings['height_m']):
         ax_needle.annotate(str(int(round(height, 0))), (float(point.x), float(point.y)))
 
-    haystack_surroundings['geometry' + r_suffix].geometry.exterior.plot(color='green', ax=ax_hay)
+    haystack_surroundings['geometry' + r_suffix].gdf.exterior.plot(color='green', ax=ax_hay)
     geometry_r.plot(ax=ax_hay, color='yellow')
     for point, height in zip(haystack_surroundings['centroid' + r_suffix].to_crs(4326),
                              haystack_surroundings['height_m' + r_suffix]):

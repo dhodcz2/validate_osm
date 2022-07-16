@@ -19,10 +19,11 @@ import geopandas as gpd
 from geopandas import GeoDataFrame
 from pandas import IndexSlice as idx
 # import pluscodes.util as util
-try:
-    import pluscodes.util as util
-except ImportError:
-    import util
+# try:
+#     import pluscodes.util as util
+# except ImportError:
+#     import util
+from pluscodes.util import Tessellations
 
 import numpy as np
 from geopandas import GeoSeries
@@ -43,11 +44,11 @@ class DescriptorLoc:
         pc = self.pluscodes
         if np.issubdtype(item.dtype, np.integer):
             footprints = pc.footprints.loc[item]
-            heads = pc.heads.loc[idx[item, :]]
+            # heads = pc.heads.loc[idx[item, :]]
             tiles = pc.tiles.loc[idx[item, :, :]]
 
         elif np.issubdtype(item.dtype, np.string_):
-            heads = pc.heads.loc[idx[:, item]]
+            # heads = pc.heads.loc[idx[:, item]]
             footprints = heads.index.get_level_values(0)
             tiles = pc.tiles.loc[idx[footprints, :, :]]
             footprints = pc.footprints.loc[idx[footprints]]

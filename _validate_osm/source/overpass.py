@@ -1,4 +1,4 @@
-
+import validate_osm
 from validate_osm.source.bbox import BBox
 import functools
 import itertools
@@ -15,6 +15,7 @@ from validate_osm.logger import logger
 from validate_osm.source.resource_ import Resource
 
 from validate_osm.source.preprocessor import CallableDynamicOverpassPreprocessor
+
 
 class FragmentBBox:
 
@@ -190,6 +191,7 @@ class DynamicOverpassResource(Resource):
     name = 'osm'
     link = 'https://www.openstreetmap.org'
     preprocess = CallableDynamicOverpassPreprocessor()
+
     def __contains__(self, item: BBox):
         if not isinstance(item, BBox):
             raise TypeError(f'expected {BBox}; got {type(item)}')
@@ -211,4 +213,3 @@ class DynamicOverpassResource(Resource):
 
     def __delete__(self, instance):
         pass
-

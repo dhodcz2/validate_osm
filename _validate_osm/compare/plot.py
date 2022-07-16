@@ -108,6 +108,8 @@ class DescriptorPlot:
             }
         return self._params
 
+
+
     def matches(self, **kwargs):
         local = locals().copy()
         (params := self.params.copy()).update(kwargs)
@@ -149,7 +151,7 @@ class DescriptorPlot:
 
         of[of['overlap'].notna()].plot(cmap='RdYlGn', column='overlap', ax=ax, legend=True)
         of[of['overlap'].isna()].plot(color='gray', ax=ax)
-        within.geometry.boundary.plot(ax=ax)
+        within.gdf.boundary.plot(ax=ax)
         #
 
         if (annotation := params['annotation']):
@@ -158,6 +160,7 @@ class DescriptorPlot:
             of = of.iloc[:bottom_5]
             for centroid, iloc in zip(of['centroid'], of[annotation]):
                 ax.annotate(str(iloc), xy=(float(centroid.x), float(centroid.y)), color='blue', fontsize=14)
+
 
     # TODO: Perpetrator is largest completion in a footprint
 
@@ -178,7 +181,7 @@ class DescriptorPlot:
 
         footprints = self._compare.footprints
         footprints = footprints[footprints.index.isin(set(of.index.get_level_values('ubid')))]
-        footprints.geometry.to_crs(params['crs']).boundary.plot(ax=ax)
+        footprints.gdf.to_crs(params['crs']).boundary.plot(ax=ax)
 
         _annotate(ax, params, of)
 
@@ -271,6 +274,12 @@ class DescriptorPlot:
     #     #
     #
 
+
+
+
+
+
+
     def matched(self, name: Hashable, others: Optional[Hashable] = None, annotation: Optional[str] = 'iloc'):
         local = locals()
         fig, ax = plt.subplots(1, 1)
@@ -324,7 +333,7 @@ class DescriptorPlot:
             axis.set_xticks([])
             axis.set_yticks([])
             for (color, hatch), loc in df.groupby(['color', 'hatch']).groups.items():
-                df.loc[loc].geometry.boundary.plot(color=color, hatch=hatch, ax=axis)
+                df.loc[loc].gdf.boundary.plot(color=color, hatch=hatch, ax=axis)
             for centroid, value in zip(df['centroid'], df[column]):
                 axis.annotate(str(value), xy=(float(centroid.x), float(centroid.y)))
 
@@ -393,3 +402,10 @@ class DescriptorPlot:
     #         return self._instance.footprints
     #     else:
     #         return self._instance.aggregate.xs(string, level='name', drop_level=True)
+
+
+
+
+
+
+

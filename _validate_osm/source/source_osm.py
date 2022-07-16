@@ -139,10 +139,10 @@ class SourceOSM(Source, abc.ABC):
                     yield None
                     continue
                 try:
-                    yield mapping[element.geometry()['type']](element.geometry()['coordinates'])
+                    yield mapping[element.gdf()['type']](element.gdf()['coordinates'])
                     continue
                 except KeyError as e:
-                    raise NotImplementedError(element.geometry()['type']) from e
+                    raise NotImplementedError(element.gdf()['type']) from e
                 except Exception:  # Exception is typically a no-go but .geometry() literally raises this
                     yield None
 
