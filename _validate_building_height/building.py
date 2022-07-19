@@ -1,10 +1,13 @@
+from geopandas import GeoDataFrame, GeoSeries
+from pandas import Series, DataFrame
+
 import abc
 import collections
 import datetime
 import warnings
 from typing import Optional, Iterator, Iterable
 
-import buildingid.code
+# import buildingid.code
 import dateutil.parser
 import geopandas as gpd
 import numpy as np
@@ -20,29 +23,38 @@ from validate_osm import (
 
 )
 from validate_osm.source.footprint import CallableFootprint
+from pluscodes.util import get_strings
 
 
 class BuildingCallableFootprint(CallableFootprint):
     def identify(self, gdf: GeoDataFrame) -> pd.Series:
-        def ubid():
-            warnings.filterwarnings('ignore', 'geographic CRS')
-            # centroid = gdf['centroid'].to_crs(4326)
-            geometry: gpd.GeoSeries = gdf['geometry'].to_crs(4326)
-            centroid = geometry.centroid
-            for x, y, (minx, miny, maxx, maxy) in zip(centroid.x, centroid.y, geometry.bounds.values):
-                #     # TODO: codeLength=11 appropriate? Programatically determine code length?
-                yield buildingid.code.encode(
-                    latitudeLo=miny,
-                    latitudeHi=maxy,
-                    longitudeLo=minx,
-                    longitudeHi=maxx,
-                    latitudeCenter=y,
-                    longitudeCenter=x,
-                    codeLength=11
-                )
+        # def ubid():
+        #     warnings.filterwarnings('ignore', 'geographic CRS')
+        #     # centroid = gdf['centroid'].to_crs(4326)
+        #     geometry: gpd.GeoSeries = gdf['geometry'].to_crs(4326)
+        #     centroid = geometry.centroid
+        #     for x, y, (minx, miny, maxx, maxy) in zip(centroid.x, centroid.y, geometry.bounds.values):
+        #         #     # TODO: codeLength=11 appropriate? Programatically determine code length?
+        #         yield buildingid.code.encode(
+        #             latitudeLo=miny,
+        #             latitudeHi=maxy,
+        #             longitudeLo=minx,
+        #             longitudeHi=maxx,
+        #             latitudeCenter=y,
+        #             longitudeCenter=x,
+        #             codeLength=11
+        #         )
+        #
+        # result = pd.Series(ubid(), index=gdf.index, name='ubid', dtype='string')
+        # return result
+        #
+        centroid = gdf['centroid'].to_crs(4326)
+        x = centroid.x.values
+        y = centroid.y.values
+        strings = get_strings(x, y)
+        return Series(strings, index=gdf.index, name='ubid', dtype='string')
 
-        result = pd.Series(ubid(), index=gdf.index, name='ubid', dtype='string')
-        return result
+
 
 
 class BuildingSource(Source):
@@ -243,7 +255,7 @@ class HeightFactoryAggregate(FactoryAggregate):
     def height_m(self):
         # don't ignore np.nan
         HEIGHT_TO_FLOOR_RATIO = 3.6
-        data = self._groups.data
+        data = self._groups.data_
         iloc = data.loc[data['height_m'].isna() & data['floors'].notna(), 'iloc']
         iloc = set(iloc)
         data['height_m'] = pd.Series((
@@ -317,7 +329,7 @@ class HeightFactoryAggregate(FactoryAggregate):
     def timestamp(self):
         def gen():
             yield from self._groups.ungrouped['timestamp']
-            series: pd.Series = self._groups.data['timestamp']
+            series: pd.Series = self._groups.data_['timestamp']
             index_max = self.index_max
             yield from (
                 series.iat[index_max[i]]
@@ -332,7 +344,7 @@ class HeightFactoryAggregate(FactoryAggregate):
     def start_date(self):
         def gen():
             yield from self._groups.ungrouped['start_date']
-            series: pd.Series = self._groups.data['start_date']
+            series: pd.Series = self._groups.data_['start_date']
             index_max = self.index_max
             yield from (
                 series.iat[index_max[i]]
@@ -345,7 +357,7 @@ class HeightFactoryAggregate(FactoryAggregate):
     def address(self):
         def gen():
             yield from self._groups.ungrouped['address']
-            series: pd.Series = self._groups.data['address']
+            series: pd.Series = self._groups.data_['address']
             index_max = self.index_max
             yield from (
                 series.iat[index_max[i]]
@@ -358,7 +370,7 @@ class HeightFactoryAggregate(FactoryAggregate):
     def cardinal(self):
         def gen():
             yield from self._groups.ungrouped.index.get_level_values('id')
-            index: pd.MultiIndex = self._groups.data.index.get_level_values('id')
+            index: pd.MultiIndex = self._groups.data_.index.get_level_values('id')
             index_max = self.index_max
             yield from (
                 index[index_max[i]]

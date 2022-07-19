@@ -138,7 +138,7 @@ class MicrosoftBuildingFootprints2017(DescriptorStaticRegions):
                 'https://data.ca.gov/dataset/e212e397-1277-4df3-8c22-40721b095f33/resource/'
                 '436fc714-831c-4070-b44b-b06dcde6bf18/download/ca-places-boundaries.zip',
             )
-            geometry: GeoSeries = geometry.set_index('NAME').geometry
+            geometry: GeoSeries = geometry.set_index('NAME').gdf
             bay = ['San Francisco', 'Cupertino', 'San Jose', 'Berkeley', 'Fremont']
             crs = geometry.crs
             geometry['Bay Area (needs to be further broken apart)'] = geometry[bay].unary_union

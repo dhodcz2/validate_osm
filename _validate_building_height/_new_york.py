@@ -4,7 +4,7 @@ import geopandas as gpd
 import datetime
 from typing import Iterable, Union
 
-# from validate_osm.data import Source, Identifier, Validating, NonEssentialData, EssentialData, Haystack
+# from _validate_osm.data import Source, Identifier, Validating, NonEssentialData, EssentialData, Haystack
 import numpy as np
 import pandas as pd
 import shapely.geometry.base
