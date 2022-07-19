@@ -1,14 +1,5 @@
 import concurrent.futures
-from pandas import IndexSlice as idx
-
-import functools
-
-import geopandas as gpd
-
-import pygeos
-from geopandas import GeoDataFrame, GeoSeries
-from pandas import Series, DataFrame
-
+import shapely.geometry
 import re
 from functools import cached_property
 from typing import Iterator, Iterable
@@ -17,8 +8,8 @@ import numpy as np
 import pandas as pd
 import pyrosm
 import requests
-import shapely.geometry
 from geopandas import GeoDataFrame
+from pandas import IndexSlice as idx
 from pandas.core.indexing import _LocIndexer
 from pyrosm.data import Africa
 from pyrosm.data import Brazil
@@ -43,19 +34,39 @@ def construct(urls: Iterable[str]) -> Iterator[MultiPolygon]:
     session = requests.Session()
     threads = concurrent.futures.ThreadPoolExecutor()
     for response in threads.map(session.get, urls):
-        response.raise_for_status()
-        yield __construct(response.text)
+        try:
+            response.raise_for_status()
+        except requests.exceptions.HTTPError:
+            yield None
+        else:
+            yield __construct(response.text)
 
 
-class LookUpRegions:
-    def __new__(cls, *args, **kwargs):
-        # Cache the structure for multiple suggest calls without instantiating everything at import time
-        if not hasattr(cls, '_instance'):
-            cls._instance = super().__new__(cls)
-        return cls._instance
+class LazyLoc(_LocIndexer):
+    def __getitem__(self, item):
+        obj: GeoDataFrame = super().__getitem__(item)
+        loc = obj.geometry.isna()
+        if count := loc.sum():
+            loc = loc[loc]
+            geometry =np.fromiter(construct(obj.loc[loc.index, 'poly']), dtype=object, count=count)
+            self.obj.loc[loc.index, 'geometry'] = geometry
+        return super(LazyLoc, self).__getitem__(item)
 
+
+class GeoRegions(GeoDataFrame):
+
+    @property
+    def loc(self, *args, **kwargs) -> LazyLoc:
+        return LazyLoc('loc', self)
+
+    def __init__(self, *args, **kwargs):
+        kwargs['geometry'] = np.full((len(kwargs['index'], )), None)
+        super().__init__(*args, **kwargs)
+
+
+class Suggest:
     @cached_property
-    def continents(self) -> DataFrame:
+    def _continents(self) -> GeoRegions:
         _continents: list[Africa] = [
             getattr(pyrosm.data.sources, continent)
             for continent in 'africa antarctica asia australia_oceania europe north_america south_america'.split()
@@ -70,18 +81,18 @@ class LookUpRegions:
             '.poly'
         )
         continents = np.array([
-            continent.continent['name']
+            continent.continent['name'].rpartition('-latest')[0]
             for continent in _continents
         ], dtype=str, )
         index = pd.Index(continents, name='continent')
 
-        return DataFrame({
+        return GeoRegions({
             'pbf': pbf,
             'poly': poly,
         }, index=index)
 
     @cached_property
-    def regions(self) -> DataFrame:
+    def _regions(self) -> GeoRegions:
         # TODO: There is actually a few seconds delay downloading all the polygons
         _continents: list[Africa] = [
             getattr(pyrosm.data.sources, continent)
@@ -114,13 +125,13 @@ class LookUpRegions:
         ], dtype=str, )
 
         index = pd.MultiIndex.from_arrays([continents, region], names=['continent', 'region'])
-        return DataFrame({
+        return GeoRegions({
             'pbf': pbf,
             'poly': poly,
         }, index=index)
 
     @cached_property
-    def subregions(self) -> DataFrame:
+    def _subregions(self) -> GeoRegions:
         s = pyrosm.data.sources.subregions
         _countries: list[Brazil] = [
             getattr(s, region)
@@ -153,13 +164,13 @@ class LookUpRegions:
             '.poly'
         )
 
-        return DataFrame({
+        return GeoRegions({
             'pbf': pbf,
             'poly': poly,
         }, index=index)
 
     @cached_property
-    def cities(self) -> DataFrame:
+    def _cities(self) -> GeoRegions:
         c = pyrosm.data.sources.cities
         cities = np.array(list(c._sources.keys()), dtype=str, )
         pbf = np.array([
@@ -170,89 +181,10 @@ class LookUpRegions:
             str.rpartition(city['url'], '.osm.pbf')[0] + '.poly'
             for city in c._sources.values()
         ], dtype=str, )
-        return DataFrame({
+        return GeoRegions({
             'pbf': pbf,
             'poly': poly,
         }, index=cities)
-
-
-class LookUpLocIndexer(_LocIndexer):
-    def __getitem__(self, item):
-        obj: GeoRegions = self.obj
-        binding = obj.binding
-        if (
-                isinstance(item, slice)
-                and item.step is None
-                and item.start is None
-                and item.stop is None
-        ):
-            index = binding.index
-        else:
-            index: pd.Index = binding.loc[item].index
-
-        if dif := index.difference(obj.index):
-            poly = binding.loc[dif, 'poly']
-            obj.loc[dif, 'geometry'] = np.fromiter(construct(poly), dtype=object)
-            obj.loc[dif, 'pbf'] = binding.loc[dif, 'pbf']
-
-        return super(LookUpLocIndexer, self).__getitem__(item)
-
-
-class GeoRegions(GeoDataFrame):
-    _metadata = GeoDataFrame._metadata + ['binding']
-
-    def __init__(self, binding: DataFrame, *args, **kwargs, ):
-        kwargs['columns'] = ['pbf', 'geometry']
-        kwargs['crs'] = 4326
-        super().__init__(*args, **kwargs)
-        index = binding.index
-        self.binding = binding
-        # self.index = index.__class__([], names=index.names)
-        if isinstance(index, pd.MultiIndex):
-            self.index = pd.MultiIndex(levels=[[], []], codes=[[], []], names=index.names)
-        elif isinstance(index, pd.Index):
-            self.index = pd.Index([], name=index.name)
-
-    def loc(self) -> LookUpLocIndexer:
-        return LookUpLocIndexer(self)
-
-    # @cached_property
-    # def loc(self) -> _LocIndexer:
-    #     # Automatically load and cache the geometries required by the key
-    #     loc = super(GeoRegions, self).loc()
-    #
-    #     def __getitem__(self_, key):
-    #         print('getitem')
-    #         binding = self.binding
-    #         if (
-    #                 isinstance(key, slice)
-    #                 and key.start is None
-    #                 and key.stop is None
-    #                 and key.step is None
-    #         ):
-    #             index = binding.index
-    #         else:
-    #             index: pd.Index = binding.loc[key].index
-    #
-    #         if dif := index.difference(self.index):
-    #             poly = binding.loc[dif, 'poly']
-    #             self.loc[dif, 'geometry'] = np.fromiter(construct(poly), dtype=object)
-    #             self.loc[dif, 'pbf'] = binding.loc[index, 'pbf']
-    #
-    #         return super(_LocIndexer, self_).__getitem__(key)
-    #
-    #     loc.__getitem__ = __getitem__
-    #     return loc
-    #
-
-
-class Suggest:
-    def __init__(self):
-        lookup = LookUpRegions()
-        self._continents = GeoRegions(lookup.continents)
-        self._regions = GeoRegions(lookup.regions)
-        self._subregions = GeoRegions(lookup.subregions)
-        self._cities = GeoRegions(lookup.cities)
 
     def cities(self, bbox: BaseGeometry, *args, url=False) -> np.array:
         # It does not appear that there is a way to subquery cities
@@ -294,25 +226,22 @@ class Suggest:
 
 suggest = Suggest()
 
-'''
-suggest.cities()
-suggest.regions()
-suggest.continents()
-'''
-
+# TODO: Unfortunately there is nothing in thi pyrosm library to indicate a discrepancy
+#   between subregions and special sub regions which overlap
+#   so we must do some web scraping
 if __name__ == '__main__':
-    lookup = LookUpRegions()
-    lookup.continents
-    lookup.regions
-    lookup.cities
-    lookup.subregions
+    # chicago = shapely.geometry.box(41.878, -87.629, 41.902, -87.614)
+    # manhattan = shapely.geometry.box(40.878, -73.629, 40.902, -73.614)
+    # moscow = shapely.geometry.box(55.878, 37.629, 55.902, 37.614)
+    # kyiv = shapely.geometry.box(50.878, 30.629, 50.902, 30.614)
+    # berlin = shapely.geometry.box(52.878, 13.629, 52.902, 13.614)
+    # mogadishu = shapely.geometry.box(1.878, 45.629, 1.902, 45.614)
 
-    chicago = shapely.geometry.box(41.878, -87.629, 41.902, -87.614)
-    manhattan = shapely.geometry.box(40.878, -73.629, 40.902, -73.614)
-    moscow = shapely.geometry.box(55.878, 37.629, 55.902, 37.614)
-    kyiv = shapely.geometry.box(50.878, 30.629, 50.902, 30.614)
-    berlin = shapely.geometry.box(52.878, 13.629, 52.902, 13.614)
-    mogadishu = shapely.geometry.box(1.878, 45.629, 1.902, 45.614)
+    chicago = shapely.geometry.box(-87.629, 41.878, -87.614, 41.902)
+    manhattan = shapely.geometry.box(-73.629, 40.878, -73.614, 40.902)
+    moscow = shapely.geometry.box(37.629, 55.878, 37.614, 55.902)
+    kyiv = shapely.geometry.box(30.629, 50.878, 30.614, 50.902)
+    berlin = shapely.geometry.box(13.629, 52.878, 13.614, 52.902)
 
     suggest.continents(chicago)
     suggest.regions(chicago)
