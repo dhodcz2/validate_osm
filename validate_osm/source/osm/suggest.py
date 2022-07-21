@@ -1,3 +1,5 @@
+import warnings
+warnings.filterwarnings('ignore', '.*Shapely GEOS.*')
 import concurrent.futures
 import io
 import itertools
@@ -5,7 +7,7 @@ import re
 from concurrent.futures import Future
 from functools import cached_property
 from pathlib import Path
-from typing import Iterator, Iterable
+from typing import Iterator, Iterable, Callable
 
 import numpy as np
 import pandas as pd
@@ -21,8 +23,6 @@ from pyrosm.data import Brazil
 from shapely.geometry import MultiPolygon, Polygon
 from shapely.geometry.base import BaseGeometry
 
-
-# TODO: .poly files are not always available; raise an exception telling user to try again later
 
 class CallableConstructPoly:
     def __init__(self):
@@ -40,13 +40,11 @@ class CallableConstructPoly:
                 f.write(response.text)
 
     @staticmethod
-    def __transform(textio: io.TextIOWrapper) -> Polygon | MultiPolygon:
+    def __transform(textio: io.TextIOWrapper) -> Polygon | MultiPolygon | str:
         text = textio.read().replace('\n', '')
         matches = re.findall(r'(?<=\d)(.*?)END', text)
-        # if not matches:
-        #     raise ValueError(f'No polygons found in {text}')
         if not matches:
-            raise ValueError(f'No polygons found')
+            return textio.name
         splits = list(map(str.split, matches))
         lons = (np.array(split[::2], dtype=np.float64) for split in splits)
         lats = (np.array(split[1::2], dtype=np.float64) for split in splits)
@@ -89,6 +87,12 @@ class CallableConstructPoly:
         with concurrent.futures.ThreadPoolExecutor() as threads:
             textio: Iterator = threads.map(lambda file: open(file, 'r'), files)
         geometry = np.fromiter(map(self.__transform, textio), dtype=object, count=len(files))
+        compress = [
+            isinstance(obj, str)
+            for obj in geometry
+        ]
+        if any(compress):
+            raise ValueError(f"No polygons found in {', '.join(itertools.compress(geometry, compress))}")
         for obj in textio:
             obj.close()
         return geometry
@@ -122,6 +126,8 @@ class GeoRegions(GeoDataFrame):
     @property
     def _constructor(self):
         return GeoRegions
+
+    # return wrapper
 
 
 class Suggest:
@@ -159,7 +165,6 @@ class Suggest:
 
     @cached_property
     def _regions(self) -> GeoRegions:
-        # TODO: There is actually a few seconds delay downloading all the polygons
         _continents: list[Africa] = [
             getattr(pyrosm.data.sources, continent)
             for continent in 'africa antarctica asia australia_oceania europe north_america south_america'.split()
@@ -271,54 +276,52 @@ class Suggest:
             'geometry': None,
         }, index=index, crs=4326)
 
-    def cities(self, bbox: BaseGeometry, *args, url=False) -> np.array:
-        # It does not appear that there is a way to subquery cities
+    def cities(self, bbox: BaseGeometry, *args, url=False) -> np.ndarray:
         cities = self._cities.loc[:]
-        cities = cities[cities.intersects(bbox)]
+        cities: GeoRegions = cities[cities.intersects(bbox)]
         if url:
             return cities['pbf'].values
         else:
-            return cities.index.get_level_values('city').values
+            return cities.index.get_level_values(-1).values
 
-    def regions(self, bbox: BaseGeometry, *args, url=False) -> np.array:
-        continents: np.ndarray = self.continents(bbox)
+    def regions(self, bbox: BaseGeometry, *args, url=False) -> np.ndarray:
+        continents = self.continents(bbox)
         regions: GeoRegions = self._regions.loc[idx[continents, :], :]
         regions = regions[regions.intersects(bbox)]
         if url:
             return regions['pbf'].values
         else:
-            return regions.index.get_level_values('region').values
+            return regions.index.get_level_values(-1).values
 
-    def subregions(self, bbox: BaseGeometry, *args, url=False) -> np.array:
-        regions: np.ndarray = self.regions(bbox)
-        subregions: GeoRegions = self._subregions.loc[idx[regions, :], :]
+    def subregions(self, bbox: BaseGeometry, *args, url=False) -> np.ndarray:
+        regions = self.regions(bbox)
+        subregions: GeoRegions = self._subregions
+        subregions = subregions.loc[subregions.index.isin(regions, level='country')]
         subregions = subregions[subregions.intersects(bbox)]
         if url:
             return subregions['pbf'].values
         else:
-            return subregions.index.get_level_values('subregion').values
+            return subregions.index.get_level_values(-1).values
 
-    def continents(self, bbox: BaseGeometry, *args, url=False) -> np.array:
+    def continents(self, bbox: BaseGeometry, *args, url=False) -> np.ndarray:
         continents = self._continents.loc[:]
-        continents = continents[continents.geometry.intersects(bbox)]
+        continents: GeoRegions = continents[continents.geometry.intersects(bbox)]
         if url:
             return continents['pbf'].values
         else:
-            return continents.index.get_level_values('continent').values
+            return continents.index.get_level_values(-1).values
 
 
 suggest = Suggest()
 
 if __name__ == '__main__':
     chicago = shapely.geometry.box(-87.629, 41.878, -87.614, 41.902)
-    montreal = shapely.geometry.box(-73.5, 45.5, -73.4, 45.6)
-    sao_paulo = shapely.geometry.box(-46.5, -23.5, -46.4, -23.4)
-    cape_town = shapely.geometry.box(-33.5, -18.5, -33.4, -18.4)
-    timbuktu = shapely.geometry.box(16.5, -4.5, 16.6, -4.4)
-    belize = shapely.geometry.box(-90.5, 17.5, -90.4, 17.6)
     abuja = shapely.geometry.box(7.5, 9.5, 7.6, 9.6)
-    nairobi = shapely.geometry.box(-36.5, -1.5, -36.4, -1.4)
-
     suggest.continents(chicago)
     suggest.regions(chicago)
     suggest.subregions(chicago)
+    suggest.cities(chicago)
+    suggest.continents(abuja)
+    suggest.regions(abuja)
+    suggest.subregions(abuja)
+    suggest.cities(abuja)
