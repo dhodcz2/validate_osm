@@ -1,27 +1,19 @@
 import concurrent.futures
-import geopandas as gpd
-
 import io
-import inspect
 import itertools
-import os.path
-from pathlib import Path
-import functools
-
-import geopandas.base
-from geopandas import GeoDataFrame, GeoSeries
-from pandas import Series, DataFrame
-
-import shapely.geometry
 import re
+from concurrent.futures import Future
 from functools import cached_property
-from typing import Iterator, Iterable, Type
+from pathlib import Path
+from typing import Iterator, Iterable
 
 import numpy as np
 import pandas as pd
 import pyrosm
 import requests
+import shapely.geometry
 from geopandas import GeoDataFrame
+from geopandas import GeoSeries
 from pandas import IndexSlice as idx
 from pandas.core.indexing import _LocIndexer
 from pyrosm.data import Africa
@@ -30,36 +22,11 @@ from shapely.geometry import MultiPolygon, Polygon
 from shapely.geometry.base import BaseGeometry
 
 
-#
-# def __construct(text: str) -> MultiPolygon:
-#     text = text.replace('\n', '')
-#     matches = re.findall(r'(?<=\d)(.*?)END', text)
-#     if not matches:
-#         raise ValueError('No polygons found')
-#     splits = list(map(str.split, matches))
-#     lons = (np.array(split[::2], dtype=np.float64) for split in splits)
-#     lats = (np.array(split[1::2], dtype=np.float64) for split in splits)
-#     polygons = map(Polygon, map(zip, lons, lats))
-#     multipolygon = MultiPolygon(polygons)
-#     return multipolygon
-#
-#
-# # TODO: cache poly files so that future requests are not necessary
-# def construct(urls: Iterable[str]) -> Iterator[MultiPolygon]:
-#     session = requests.Session()
-#     threads = concurrent.futures.ThreadPoolExecutor()
-#     for response in threads.map(session.get, urls):
-#         try:
-#             response.raise_for_status()
-#         except requests.exceptions.HTTPError:
-#             yield None
-#         else:
-#             yield __construct(response.text)
-
+# TODO: .poly files are not always available; raise an exception telling user to try again later
 
 class CallableConstructPoly:
     def __init__(self):
-        self._directory = Path(inspect.getfile(self.__class__)).parent / 'poly'
+        self._directory = Path(__file__).parent / 'poly'
         self._directory.mkdir(exist_ok=True, parents=True)
 
     @staticmethod
@@ -68,25 +35,25 @@ class CallableConstructPoly:
             try:
                 response.raise_for_status()
             except requests.exceptions.HTTPError as e:
-                # f.write('')
                 raise
             else:
                 f.write(response.text)
 
     @staticmethod
-    def __transform(textio: io.TextIOWrapper) -> BaseGeometry:
+    def __transform(textio: io.TextIOWrapper) -> Polygon | MultiPolygon:
         text = textio.read().replace('\n', '')
-        if not text:
-            return shapely.geometry.Point()
         matches = re.findall(r'(?<=\d)(.*?)END', text)
+        # if not matches:
+        #     raise ValueError(f'No polygons found in {text}')
         if not matches:
-            raise ValueError(f'No polygons found in {text}')
+            raise ValueError(f'No polygons found')
         splits = list(map(str.split, matches))
         lons = (np.array(split[::2], dtype=np.float64) for split in splits)
         lats = (np.array(split[1::2], dtype=np.float64) for split in splits)
         polygons = map(Polygon, map(zip, lons, lats))
-        multipolygon = MultiPolygon(polygons)
-        return multipolygon
+        if len(matches) == 1:
+            return next(polygons)
+        return MultiPolygon(polygons)
 
     def __call__(self, poly: np.ndarray | Iterable[str]) -> np.ndarray:
         directory = self._directory
@@ -99,10 +66,28 @@ class CallableConstructPoly:
             for file in files
         ]
         session = requests.Session()
-        responses = concurrent.futures.ThreadPoolExecutor().map(session.get, itertools.compress(poly, compress))
         with concurrent.futures.ThreadPoolExecutor() as threads:
-            threads.map(self.__extract, itertools.compress(files, compress), responses)
-        textio: Iterator = concurrent.futures.ThreadPoolExecutor().map(lambda file: open(file, 'r'), files)
+            futures: dict[Future, str] = {
+                threads.submit(session.get, url): url
+                for url in itertools.compress(poly, compress)
+            }
+            for _ in concurrent.futures.as_completed(futures):
+                ...
+        exceptions = list(map(Future.exception, futures))
+        if any(exceptions):
+            raise requests.exceptions.HTTPError(
+                f'Unable to download {sum(exceptions)} files; the .poly files available on GeoFabrik come in and out; '
+                f'available files are locally cached. Try again later.'
+            )
+
+        with concurrent.futures.ThreadPoolExecutor() as threads:
+            threads.map(
+                self.__extract,
+                itertools.compress(files, compress),
+                map(Future.result, itertools.compress(futures, compress))
+            )
+        with concurrent.futures.ThreadPoolExecutor() as threads:
+            textio: Iterator = threads.map(lambda file: open(file, 'r'), files)
         geometry = np.fromiter(map(self.__transform, textio), dtype=object, count=len(files))
         for obj in textio:
             obj.close()
@@ -113,37 +98,6 @@ construct = CallableConstructPoly()
 
 
 class LazyGeoLoc(_LocIndexer):
-    # def __getitem__(self, item):
-    #
-    #     # Only loads whatever geometry is currently required
-    #     if isinstance(item, tuple):
-    #         loc, column = item
-    #         if isinstance(column, str) and column != 'geometry':
-    #             return super().__getitem__(item)
-    #     else:
-    #         loc = item
-    #     geometry: GeoSeries | None | BaseGeometry = super().__getitem__((loc, 'geometry'))
-    #
-    #     if issubclass(type(geometry), BaseGeometry):
-    #         ...
-    #     elif geometry is None:
-    #         poly = super().__getitem__((loc, 'poly'))
-    #         geometry, = construct(poly)
-    #         self.__setitem__((loc, 'geometry'), geometry)
-    #
-    #     elif issubclass(type(geometry), Series):
-    #         isna = geometry.isna()
-    #         if count := isna.sum():
-    #             loc = isna.index[isna]
-    #             poly = super().__getitem__((loc, 'poly'))
-    #             geometry: np.ndarray = np.fromiter(construct(poly), dtype=object, count=count)
-    #             self.__setitem__((loc, 'geometry'), geometry)
-    #
-    #     else:
-    #         raise TypeError(type(geometry))
-    #
-    #     return super().__getitem__(item)
-    #
 
     def __getitem__(self, item):
         result = super().__getitem__(item)
@@ -365,7 +319,6 @@ if __name__ == '__main__':
     abuja = shapely.geometry.box(7.5, 9.5, 7.6, 9.6)
     nairobi = shapely.geometry.box(-36.5, -1.5, -36.4, -1.4)
 
-    suggest.subregions(chicago)
     suggest.continents(chicago)
     suggest.regions(chicago)
     suggest.subregions(chicago)
