@@ -131,10 +131,10 @@ class GeoRegions(GeoDataFrame):
 
 
 class Suggest:
-    def __new__(cls, *args, **kwargs):
-        if not hasattr(cls, '_instance'):
-            cls._instance = super().__new__(cls)
-        return cls._instance
+    # def __new__(cls, *args, **kwargs):
+    #     if not hasattr(cls, '_instance'):
+    #         cls._instance = super().__new__(cls)
+    #     return cls._instance
 
     @cached_property
     def _continents(self) -> GeoRegions:
@@ -312,9 +312,9 @@ class Suggest:
             return continents.index.get_level_values(-1).values
 
 
-suggest = Suggest()
 
 if __name__ == '__main__':
+    suggest = Suggest()
     chicago = shapely.geometry.box(-87.629, 41.878, -87.614, 41.902)
     abuja = shapely.geometry.box(7.5, 9.5, 7.6, 9.6)
     suggest.continents(chicago)
