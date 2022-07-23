@@ -116,7 +116,6 @@ class LazyGeoLoc(_LocIndexer):
                 self.__setitem__((loc, 'geometry'), geometry)
         return super(LazyGeoLoc, self).__getitem__(item)
 
-
 class GeoRegions(GeoDataFrame):
 
     @property
@@ -131,10 +130,10 @@ class GeoRegions(GeoDataFrame):
 
 
 class Suggest:
-    # def __new__(cls, *args, **kwargs):
-    #     if not hasattr(cls, '_instance'):
-    #         cls._instance = super().__new__(cls)
-    #     return cls._instance
+    def __new__(cls, *args, **kwargs):
+        if not hasattr(cls, '_instance'):
+            cls._instance = super().__new__(cls)
+        return cls._instance
 
     @cached_property
     def _continents(self) -> GeoRegions:

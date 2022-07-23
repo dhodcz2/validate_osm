@@ -16,129 +16,6 @@ if False:
     from .source import Source
 
 
-@dataclass
-class StructInheritance:
-    name: str
-    cls: str
-    func: Callable
-    dtype: str
-    abstract: bool
-    crs: Any
-    dependent: set[str]
-
-    def __hash__(self):
-        return hash(self.name)
-
-    def __eq__(self, other):
-        return self.name == other
-
-    def __repr__(self):
-        return f"{self.__class__.__name__}[{self.name} from {self.cls}]"
-
-    @property
-    def decorated(self) -> Callable[['Source'], Series | np.ndarray]:
-        if self.abstract:
-            raise TypeError(f'{self} is an abstract method.')
-
-        def wrapper(source: 'Source'):
-            data: Iterable = self.func(source)
-
-            if self.dtype == 'geometry':
-                if isinstance(data, GeoSeries):
-                    if data.crs is not self.crs:
-                        data = data.to_crs(self.crs)
-                elif self.crs is None:
-                    data = GeoSeries(data, crs=None)
-                else:
-                    raise TypeError(f'Expected GeoSeries, got {type(data)}.')
-
-            else:
-                if isinstance(data, (Series, np.ndarray)):
-                    if data.dtype != self.dtype:
-                        data = data.astype(self.dtype)
-                else:
-                    data = np.ndarray(data, dtype=self.dtype)
-
-            return data
-
-        return wrapper
-
-
-class DescriptorInheritances:
-    def __init__(self):
-        self.data: dict[Type['Source'], dict[str, StructInheritance]] = {}
-
-    def __getitem__(self, item: Type['Source']) -> dict[str, 'StructInheritance']:
-        if item in self.data:
-            return self.data[item]
-        from validate_osm.source.source import Source
-        sources = [
-            s for s in item.mro()[:0:-1]
-            if issubclass(s, Source)
-        ]
-        # start reversed to maintain O(x) instead of O(x^2)
-        inheritances = [
-            self[source]
-            for source in sources
-        ]
-        inheritances.reverse()
-        names: set[str] = set(getattr(item, '_data', {}).keys())
-        names.update(
-            key
-            for inherit in inheritances
-            for key in inherit.keys()
-        )
-
-        def inherit(name: str) -> StructInheritance:
-            if hasattr(item, '_data') and name in (structs := getattr(item, '_data', {})):
-                return structs[name]
-            struct_list: Iterator[StructInheritance] = [
-                inherit[name]
-                for inherit in inheritances
-                if name in inherit
-            ]
-            structs = iter(struct_list)
-            try:
-                struct = next(structs)
-            except StopIteration as e:
-                raise RuntimeError from e
-
-            # Get first inheritance
-            dtype = struct.dtype
-            subtype = struct.subtype
-            crs = struct.crs
-            dependent = struct.dependent
-
-            if name in item.__dict__:
-                func = getattr(item, name)
-                abstract = getattr(func, '__isabstractmethod__', False)
-                if abstract:
-                    raise RuntimeError(f"{item=}; {name=}, {abstract=}")
-                cls = item.__name__
-            else:
-                # Get first inheritance that isn't abstract
-                if struct.abstract:
-                    for struct in structs:
-                        if not struct.abstract:
-                            break
-                abstract = struct.abstract
-                func = struct.func
-                cls = struct.cls
-
-            return StructInheritance(
-                name=name,
-                func=func,
-                dtype=dtype,
-                abstract=abstract,
-                crs=crs,
-                cls=cls,
-                dependent=dependent
-            )
-
-        result = self.data[item] = {name: inherit(name) for name in names}
-        return result
-
-
 class DecoratorData:
     """
     @DecoratorData(dtype='datetime64[ns]', dependent='geometry', ...)
@@ -174,6 +51,10 @@ class DecoratorData:
             dependent=self.dependent
         )
         return func
+
+    def aggregate(self):
+        # TODO
+        raise NotImplementedError()
 
 
 class DescriptorData:
@@ -252,3 +133,6 @@ class DescriptorData:
             return col.repeat(repeat)
         else:
             raise NotImplementedError(type(col))
+
+
+column = DecoratorData

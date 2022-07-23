@@ -1,9 +1,10 @@
 import concurrent
+from concurrent.futures import ThreadPoolExecutor
 import concurrent.futures
 import itertools
 import os
 from pathlib import Path
-from typing import Collection
+from typing import Collection, Iterator
 
 import psutil
 import requests
@@ -11,73 +12,57 @@ import requests
 from .file import StructFile, StructFiles, ListFiles
 from ..preprocess import CallablePreprocessor
 
+if False:
+    from ..source import Source
+
+__all__ = ['StaticPreprocessor']
+
 
 class StaticPreprocessor(CallablePreprocessor):
-    # def __call__(self, *sources, **kwargs):
-    #     files: list[StructFile, StructFiles] = [
-    #         file
-    #         for source in sources
-    #         for file in source.resource[self.bbox]
-    #     ]
-    #     extract = [
-    #         file for file in files
-    #         if (
-    #                 not file.data.exists()
-    #                 or file.source.redo
-    #                 and not file.raw.exists()
-    #         )
-    #     ]
-    #     self.__extract(extract)
-    #     transform = [
-    #         file for file in extract
-    #         if (
-    #                 not file.data.exists()
-    #                 or file.source.redo
-    #         )
-    #     ]
-    #     with concurrent.futures.ThreadPoolExecutor() as threads:
-    #         paths = (file.data.parent for file in files if not file.data.parent.exists())
-    #         threads.map(paths, os.makedirs)
-    #     self.__load_transform(transform)
 
+    def __new__(cls, *args, **kwargs):
+        if not hasattr(cls, '_instance'):
+            cls._instance = super().__new__(cls)
+        return cls._instance
 
-    def __preprocess(self, *sources: Collection['Source'], **kwargs):
+    def __call__(self, *sources: Collection['Source'], **kwargs):
         files = ListFiles([
             files
             for source in sources
             for files in source.resource[self.bbox]
         ])
-        extract = ListFiles([
-            file for file in files if
-            not file.data_.exists()
-            or file.source.redo
-            and not file.raw.exists()
-        ])
-        self.__extract(extract)
         transform = ListFiles([
-            file for file in extract if
-            not file.data_.exists()
+            file for file in files if
+            not file.data.exists()
             or file.source.redo
         ])
-        with concurrent.futures.ThreadPoolExecutor() as threads:
-            paths = (file.data_.parent for file in files if not file.data_.parent.exists())
-            threads.map(paths, Path.mkdir)
-        self.__load_transform(transform)
+        extract = ListFiles([
+            file for file in transform
+            if not file.raw.exists()
+        ])
+        self._extract(extract)
+        self._load(transform)
 
+    def _download(self, file: StructFile, session: requests.Session):
+        url = file.url
+        raw = file.raw
+        r = requests.get(url, stream=True, session=session)
+        parent = raw.parent
+        if not parent.exists():
+            parent.mkdir(parents=True, exist_ok=True)
+        r.raise_for_status()
+        with raw.open('wb') as f:
+            for chunk in r.iter_content(chunk_size=1024):
+                if chunk:
+                    f.write(chunk)
 
-    def __extract(self, files: ListFiles):
-        with requests.Session() as session, concurrent.futures.ThreadPoolExecutor() as threads:
-            paths = (file.raw.parent for file in files if not file.raw.parent.exists())
-            threads.map(paths, os.makedirs)
-            url = (file.url for file in files)
-            raw = (file.raw for file in files)
-            session = itertools.repeat(session)
-            threads.map(self.download, url, raw, session)
+    def _extract(self, files: ListFiles):
+        file: StructFile | StructFiles
+        with ThreadPoolExecutor() as threads, requests.Session() as session:
+            threads.map(self._download, files.url, files.raw, itertools.repeat(session))
 
-    def __load_transform(self, files: ListFiles):
-        # TODO: Perhaps there is a way we can exploit parallelism when performing the transform
-        #   however I cannot think of a way that is safe for memory consumption
-        #   regardless I don't think this step is too time consuming
+    def _load(self, files: ListFiles):
+
         half = psutil.virtual_memory().total // 2
         if psutil.virtual_memory().available < half:
             raise MemoryError('This process requires at least half of the available memory')
@@ -102,8 +87,7 @@ class StaticPreprocessor(CallablePreprocessor):
             ):
                 decreasing -= 1
                 file = files[decreasing]
-                load = file.load
-                futures.append(threads.submit(load, file.raw))
+                futures.append(threads.submit(file.load, file.raw))
 
             # Consume files while we can't load files
             if (
@@ -113,28 +97,23 @@ class StaticPreprocessor(CallablePreprocessor):
                 file = files[len(files) - increasing - 1]
                 source = file.source
                 raw = futures[increasing].result()
-                increasing += 1
+                data = file.data
+                if not data.exists():
+                    data.parent.mkdir(parents=True, exist_ok=True)
 
-                # These two lines are literally what start the transform process
                 source.resource = raw
-                source.data_.to_feather(file.data_)
-
+                source.data.to_feather(file.data)
                 del source.resource
-                del source.data_
-
+                del source.data
         # TODO: don't forget you still have to work how preprocess() is called among the multiple sources
 
     @staticmethod
-    def __transform(file: StructFile | StructFiles, ):
-        source = file.source()
+    def _transform(file: StructFile | StructFiles, ):
+        source = file.source
         source.resource = file.load(file.raw)
+        parent = file.data.parent
+        if not parent.exists():
+            parent.mkdir(parents=True, exist_ok=True)
         source.data.to_feather(file.data)
-
-    @staticmethod
-    def download(url: str, path: Path, session: requests.Session = None) -> None:
-        response = session.get(url, stream=True) if session is not None else requests.get(url, stream=True)
-        response.raise_for_status()
-        with open(path, 'wb') as f:
-            for chunk in response.iter_content(chunk_size=1024):
-                if chunk:
-                    f.write(chunk)
+        del source.resource
+        del source.data

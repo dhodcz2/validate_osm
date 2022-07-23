@@ -1,22 +1,17 @@
-from geopandas import GeoDataFrame, GeoSeries
-import numpy as np
-
-from pandas import Series, DataFrame
-
-import inspect
+import abc
 import functools
-from pathlib import Path
-from functools import lru_cache
 import itertools
+from functools import lru_cache
 from typing import Type, Any, Iterable, Iterator
 
+import numpy as np
+from geopandas import GeoSeries
 from shapely.geometry.base import BaseGeometry
-import abc
 
+from .preprocess import StaticPreprocessor
 from ..bbox import BBox
 from ..resource_ import DescriptorResource
-from .preprocess import StaticPreprocessor
-from .file import StructFile, StructFiles, ListFiles
+from .file import StructFile, ListFiles, StructFiles
 
 if False:
     from ..source import Source
@@ -30,13 +25,15 @@ class DescriptorStaticResource(DescriptorResource, abc.ABC):
         ...
 
     def __get__(self, instance: 'Source', owner: Type['Source']):
+        if instance is None:
+            return self
+        self.source = instance
+        self.Source = owner
         if hasattr(instance, '_resource'):
             if len(instance._resource) == 0:
                 raise ValueError(f'len(instance._resource) == 0')
-            return instance._resource
-        self.source = instance
-        self.Source = owner
-        return self
+            self.__set__(instance, )
+        return instance._resource
 
     def __bool__(self):
         files = self[self.source.bbox]
@@ -84,28 +81,25 @@ class DescriptorStaticNaive(DescriptorStaticResource, abc.ABC):
         return self.boundary.latlon.intersects(item.to_crs(self.boundary.crs))
 
 
-class DescriptorStaticRegions(DescriptorStaticResource, abc.ABC):
-
-    @lru_cache(1)
-    def __getitem__(self, item: BBox) -> ListFiles:
-        ...
-
-
-class RegionMeta(abc.ABCMeta):
-    def __init__(self, name, bases, local):
-        super(RegionMeta, self).__init__(name, bases, local)
-        local['geometry'] = functools.cached_property(local['geometry'])
-
-
-class StaticRegion(abc.ABC, metaclass=RegionMeta):
+class StaticRegion(abc.ABC):
     @abc.abstractmethod
     @property
     def geometry(self) -> GeoSeries:
-        ...
+        """GeoSeries, where polygons represent the region boundary and the index is the region name."""
 
     @abc.abstractmethod
-    def urls(self, names: Iterable[str]) -> Iterator[str]:
-        ...
+    def urls(self, names: Iterable[str]) -> Iterator[str | Iterable[str]]:
+        """Maps region names to URLs."""
+
+    def __set_name__(self, owner: 'DescriptorStaticRegions', name):
+        self.name = name
+        if 'regions' not in owner.__dict__:
+            owner.regions = []
+        owner.regions.append(self)
+
+    def __get__(self, instance: 'DescriptorStaticRegions', owner):
+        self.source = instance.source
+        self.resource = instance
 
     @lru_cache(1)
     def __contains__(self, item: BBox):
@@ -121,10 +115,27 @@ class StaticRegion(abc.ABC, metaclass=RegionMeta):
         def structs() -> Iterator[StructFile | StructFiles]:
             for name, url in zip(names, urls):
                 if isinstance(url, str):
-                    yield StructFile(name, url)
+                    yield StructFile(name=name, url=url, source=self.source)
                 elif isinstance(url, Iterable):
-                    yield StructFiles(name, url)
+                    files = [
+                        StructFile(name=name, url=u, source=self.source)
+                        for u in url
+                    ]
+                    yield StructFiles(files=files, source=self.source, name=name)
                 else:
                     raise TypeError(url)
 
+        return ListFiles(list(structs()))
 
+
+class DescriptorStaticRegions(DescriptorStaticResource, abc.ABC):
+    regions: list['StaticRegion']
+
+    @lru_cache(1)
+    def __getitem__(self, item: BBox) -> ListFiles:
+        files = list(itertools.chain.from_iterable(region[item] for region in self.regions))
+        return ListFiles(files)
+
+    @lru_cache(1)
+    def __contains__(self, item):
+        return any(item in region for region in self.regions)

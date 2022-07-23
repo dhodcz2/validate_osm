@@ -40,6 +40,7 @@ class CallablePreprocessor(abc.ABC):
 class DescriptorResource(abc.ABC):
     name: str
     boundary: BBox
+    preprocessor: CallablePreprocessor
 
     @abc.abstractmethod
     def __get__(self, instance, owner):

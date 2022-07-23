@@ -1,22 +1,14 @@
-import functools
-from collections.abc import Collection, Container
+import concurrent.futures
+from functools import cached_property
+from collections import UserList
 from collections import UserList
 from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Iterable, Iterator, Callable
+
 import geopandas as gpd
 import pandas as pd
-
-from geopandas import GeoDataFrame, GeoSeries
-from pandas import Series, DataFrame
-
-import abc
-import concurrent
-import logging
-import os
-from pathlib import Path
-from typing import Iterable, Union, Iterator, Type
-
-import concurrent.futures
-import requests
+from geopandas import GeoDataFrame
 
 # noinspection PyUnreachableCode
 if False:
@@ -25,9 +17,8 @@ if False:
 
 @dataclass(repr=False)
 class StructFile:
-    # TODO: Perhaps instantiate StructFile as StructFileFactory
-    url: str = field(init=False)
-    source: Type['Source'] = field(init=False)  # TODO: How can we make this automatic?
+    url: str = field(repr=False)
+    source: 'Source' = field(repr=False)
     name: str = field(repr=False, default=None)
     size: int = field(init=False, repr=False, compare=True)
 
@@ -42,12 +33,15 @@ class StructFile:
             )
         self.size = self.raw.stat().st_size
 
+    @cached_property
+    def directory(self) -> Path:
+        return self.source.__class__.resource.directory
 
-    @property
+    @cached_property
     def raw(self) -> Path:
         return self.source.__class__.resource.raw / self.name
 
-    @property
+    @cached_property
     def data(self) -> Path:
         return self.source.__class__.resource.data / self.name
 
@@ -68,7 +62,7 @@ class StructFile:
 @dataclass(repr=False)
 class StructFiles:
     files: list[StructFile] = field(repr=False)
-    source: Type['Source'] = field(repr=False)
+    source: 'Source' = field(repr=False)
     name: str = field(repr=False, default=None)
     size: int = field(init=False, repr=False, compare=True)
 
@@ -83,10 +77,17 @@ class StructFiles:
     def raw(self) -> Iterator[Path]:
         return (file.raw for file in self.files)
 
+    # noinspection PyTypeChecker
     @staticmethod
     def load(paths: Iterable[Path]) -> GeoDataFrame:
-        # noinspection PyTypeChecker
-        return pd.concat(map(StructFile.load, paths))
+        def gdfs() -> Iterator[GeoDataFrame]:
+            with concurrent.futures.ThreadPoolExecutor() as threads:
+                yield from concurrent.futures.as_completed([
+                    threads.submit(StructFile.load, path)
+                    for path in paths
+                ])
+
+        return pd.concat(gdfs())
 
     def __repr__(self):
         return f'{self.source.name}.{self.name}'
@@ -95,12 +96,29 @@ class StructFiles:
         for file in self.files:
             file.path.unlink()
 
+
 class ListFiles(UserList):
+    data: list[StructFile, StructFiles]
+    __iter__: Callable[[], Iterator[StructFile | StructFiles]]
+    __getitem__: Callable[[int], StructFile | StructFiles]
+
+    @property
+    def url(self) -> Iterator[str]:
+        for file in self.data:
+            if isinstance(file, StructFiles):
+                for f in file.files:
+                    yield f.url
+            elif isinstance(file, StructFile):
+                yield file.url
+            else:
+                raise TypeError(f'{file} is not a StructFile or StructFiles')
+
     @property
     def data_(self) -> Iterator[Path]:
         for file in self.data_:
             if isinstance(file, StructFiles):
-                yield from file.data
+                for f in file.files:
+                    yield f.data
             elif isinstance(file, StructFile):
                 yield file.data
             else:
@@ -110,7 +128,8 @@ class ListFiles(UserList):
     def raw(self) -> Iterator[Path]:
         for file in self.data_:
             if isinstance(file, StructFiles):
-                yield from file.raw
+                for f in file.files:
+                    yield f.raw
             elif isinstance(file, StructFile):
                 yield file.raw
             else:

@@ -1,0 +1,8 @@
+
+class DecoratorAggregate:
+    ...
+
+
+class DescriptorAggregate:
+    ...
+
